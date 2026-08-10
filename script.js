@@ -522,12 +522,7 @@ async function handleLogin() {
   const email = document.querySelector("#authEmail").value.trim();
   if (!email) return;
 
-  const { error } = await supabaseClient.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: window.location.href.split("#")[0],
-    },
-  });
+  const { error } = await supabaseClient.auth.signInWithOtp({ email });
 
   document.querySelector("#authStatus").textContent = error
     ? "Não foi possível enviar o link de acesso."
