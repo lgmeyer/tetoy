@@ -3,137 +3,247 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Painel de Auditoria Financeira</title>
+    <title>Tetoy | Despesas e Receitas</title>
     <meta
       name="description"
-      content="Dashboard mocked para auditoria de pagamentos recorrentes e fluxo de caixa semanal."
+      content="Painel simples para visualizar e inserir despesas e receitas Tetoy."
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="Navegação principal">
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true">AF</span>
+    <main class="app-shell">
+      <section class="choice-screen" id="homeView" aria-labelledby="homeTitle">
+        <div class="brand-block">
+          <span class="brand-mark" aria-hidden="true">T</span>
           <div>
-            <strong>Auditoria</strong>
-            <span>Fluxo semanal</span>
+            <p class="eyebrow">Tetoy / 2026</p>
+            <h1 id="homeTitle">Despesas e receitas</h1>
           </div>
         </div>
 
-        <nav class="nav-list" aria-label="Seções do painel">
-          <a class="nav-item active" href="#resumo">Resumo</a>
-          <a class="nav-item" href="#recorrentes">Recorrentes</a>
-          <a class="nav-item" href="#fluxo">Fluxo</a>
-          <a class="nav-item" href="#extrato">Extrato</a>
-        </nav>
+        <div class="choice-grid" aria-label="Escolha uma ação">
+          <button class="choice-card" type="button" data-view-target="viewData">
+            <span>Visualizar dados</span>
+            <strong>Planilha, totais e gráficos</strong>
+            <small>Consulte os valores por mês com a tabela em destaque.</small>
+          </button>
 
-        <div class="sidebar-note">
-          <span>Mocked</span>
-          <p>Pronto para receber a integração do extrato na próxima etapa.</p>
+          <button class="choice-card" type="button" data-view-target="insertData">
+            <span>Inserir dados</span>
+            <strong>Novo lançamento</strong>
+            <small>Informe opção, valor, débito ou crédito e data.</small>
+          </button>
         </div>
-      </aside>
+      </section>
 
-      <main class="main-content">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">Conta operacional</p>
-            <h1>Controle semanal de entradas e saídas</h1>
-          </div>
+      <section class="workspace is-hidden" id="workspaceView" aria-live="polite">
+        <aside class="sidebar" aria-label="Navegação do painel">
+          <button class="back-button" id="backHomeButton" type="button">Início</button>
 
-          <div class="toolbar" aria-label="Filtros do painel">
-            <label for="weekFilter">Semana</label>
-            <select id="weekFilter"></select>
-            <button id="exportButton" type="button">Exportar CSV</button>
-          </div>
-        </header>
-
-        <section id="resumo" class="metric-grid" aria-label="Resumo financeiro">
-          <article class="metric-card">
-            <span>Entradas da semana</span>
-            <strong id="incomeMetric">R$ 0,00</strong>
-            <small id="incomeDelta"></small>
-          </article>
-
-          <article class="metric-card">
-            <span>Saídas da semana</span>
-            <strong id="expenseMetric">R$ 0,00</strong>
-            <small id="expenseDelta"></small>
-          </article>
-
-          <article class="metric-card">
-            <span>Saldo líquido</span>
-            <strong id="netMetric">R$ 0,00</strong>
-            <small id="netDelta"></small>
-          </article>
-
-          <article class="metric-card alert">
-            <span>Pagamentos a revisar</span>
-            <strong id="reviewMetric">0</strong>
-            <small id="reviewDetail"></small>
-          </article>
-        </section>
-
-        <section class="content-grid">
-          <article id="recorrentes" class="panel audit-panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Auditoria</p>
-                <h2>Pagamentos recorrentes semanais</h2>
-              </div>
-              <label class="toggle-control">
-                <input id="showOnlyIssues" type="checkbox" />
-                <span>Somente pendências</span>
-              </label>
-            </div>
-
-            <div id="auditList" class="audit-list"></div>
-          </article>
-
-          <article id="fluxo" class="panel chart-panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Fluxo de caixa</p>
-                <h2>Entradas, saídas e saldo por semana</h2>
-              </div>
-              <div class="legend" aria-label="Legenda do gráfico">
-                <span><i class="legend-income"></i>Entradas</span>
-                <span><i class="legend-expense"></i>Saídas</span>
-                <span><i class="legend-net"></i>Saldo</span>
-              </div>
-            </div>
-            <canvas id="cashflowChart" height="260" aria-label="Gráfico de fluxo de caixa"></canvas>
-          </article>
-        </section>
-
-        <section id="extrato" class="panel">
-          <div class="panel-header table-heading">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true">T</span>
             <div>
-              <p class="eyebrow">Extrato mocked</p>
-              <h2>Lançamentos da semana selecionada</h2>
+              <strong>Tetoy</strong>
+              <span>Controle mensal</span>
             </div>
-            <span id="transactionCount" class="pill">0 lançamentos</span>
           </div>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>Descrição</th>
-                  <th>Categoria</th>
-                  <th>Tipo</th>
-                  <th class="amount-cell">Valor</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="transactionRows"></tbody>
-            </table>
-          </div>
-        </section>
-      </main>
-    </div>
+          <nav class="nav-list" aria-label="Ações">
+            <button class="nav-item active" type="button" data-view-target="viewData">
+              Visualizar dados
+            </button>
+            <button class="nav-item" type="button" data-view-target="insertData">
+              Inserir dados
+            </button>
+          </nav>
 
+          <section class="auth-box" aria-label="Acesso aos dados">
+            <p class="eyebrow">Acesso</p>
+            <p id="authStatus">Informe seu e-mail para carregar os dados do Supabase.</p>
+            <label id="authEmailLabel">
+              <span>E-mail</span>
+              <input id="authEmail" type="email" placeholder="voce@email.com" autocomplete="email" />
+            </label>
+            <div class="auth-actions">
+              <button id="loginButton" type="button">Entrar</button>
+              <button id="logoutButton" class="secondary-dark-button is-hidden" type="button">Sair</button>
+            </div>
+          </section>
+
+          <div class="sidebar-note">
+            <span id="storageLabel">Supabase</span>
+            <p id="storageDetail">Dados persistentes por usuário autenticado.</p>
+          </div>
+        </aside>
+
+        <div class="main-content">
+          <section class="view-panel" id="viewData">
+            <header class="topbar">
+              <div>
+                <p class="eyebrow">Visualizar dados</p>
+                <h2>Planilha de despesas e receitas Tetoy / 2026</h2>
+              </div>
+
+              <div class="toolbar" aria-label="Filtros da visualização">
+                <label for="monthFilter">Mês</label>
+                <select id="monthFilter"></select>
+                <button id="clearEntriesButton" type="button">Limpar lançamentos</button>
+              </div>
+            </header>
+
+            <section class="metric-grid" aria-label="Resumo mensal">
+              <article class="metric-card">
+                <span>Total do mês</span>
+                <strong id="selectedMonthTotal">R$ 0,00</strong>
+                <small id="selectedMonthLabel">Mês selecionado</small>
+              </article>
+
+              <article class="metric-card">
+                <span>Total anual</span>
+                <strong id="annualTotal">R$ 0,00</strong>
+                <small>Valores da planilha mais lançamentos inseridos</small>
+              </article>
+
+              <article class="metric-card">
+                <span>Créditos inseridos</span>
+                <strong id="creditTotal">R$ 0,00</strong>
+                <small>Somente registros adicionados nesta tela</small>
+              </article>
+
+              <article class="metric-card alert">
+                <span>Débitos inseridos</span>
+                <strong id="debitTotal">R$ 0,00</strong>
+                <small>Somente registros adicionados nesta tela</small>
+              </article>
+            </section>
+
+            <section class="panel spreadsheet-panel" aria-labelledby="spreadsheetTitle">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Destaque</p>
+                  <h3 id="spreadsheetTitle">Tabela mensal no formato da planilha</h3>
+                </div>
+                <span class="pill" id="entryCount">0 lançamentos inseridos</span>
+              </div>
+
+              <div class="table-wrap">
+                <table class="spreadsheet-table">
+                  <thead id="spreadsheetHead"></thead>
+                  <tbody id="spreadsheetRows"></tbody>
+                  <tfoot id="spreadsheetFoot"></tfoot>
+                </table>
+              </div>
+            </section>
+
+            <section class="content-grid">
+              <article class="panel chart-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Gráfico mensal</p>
+                    <h3>Valores por mês</h3>
+                  </div>
+                </div>
+                <canvas id="monthlyChart" height="260" aria-label="Gráfico de valores por mês"></canvas>
+              </article>
+
+              <article class="panel chart-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Gráfico por opção</p>
+                    <h3>Totais por categoria</h3>
+                  </div>
+                </div>
+                <canvas id="categoryChart" height="260" aria-label="Gráfico de totais por categoria"></canvas>
+              </article>
+            </section>
+          </section>
+
+          <section class="view-panel is-hidden" id="insertData">
+            <header class="topbar">
+              <div>
+                <p class="eyebrow">Inserir dados</p>
+                <h2>Novo lançamento</h2>
+              </div>
+            </header>
+
+            <section class="panel form-panel">
+              <form id="entryForm">
+                <div class="form-grid">
+                  <label>
+                    <span>Opção da planilha</span>
+                    <select id="entryCategory" required></select>
+                  </label>
+
+                  <label>
+                    <span>Valor</span>
+                    <input
+                      id="entryValue"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0,00"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    <span>Débito ou crédito</span>
+                    <select id="entryDirection" required>
+                      <option value="debit">Débito</option>
+                      <option value="credit">Crédito</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Data</span>
+                    <input id="entryDate" type="date" required />
+                  </label>
+                </div>
+
+                <label class="full-field">
+                  <span>Observação</span>
+                  <input id="entryNote" type="text" placeholder="Opcional" />
+                </label>
+
+                <div class="form-actions">
+                  <button type="submit">Salvar lançamento</button>
+                  <button class="secondary-button" type="button" data-view-target="viewData">
+                    Ver tabela
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header table-heading">
+                <div>
+                  <p class="eyebrow">Histórico</p>
+                  <h3>Lançamentos inseridos</h3>
+                </div>
+                <span class="pill" id="localEntryCount">0 registros</span>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Opção</th>
+                      <th>Tipo</th>
+                      <th class="amount-cell">Valor</th>
+                      <th>Observação</th>
+                    </tr>
+                  </thead>
+                  <tbody id="entryRows"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="script.js"></script>
   </body>
 </html>
