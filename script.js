@@ -38,7 +38,6 @@ const state = {
   selectedMonth: "ago",
   entries: [],
   storageMode: "browser",
-  session: null,
 };
 
 const currency = new Intl.NumberFormat("pt-BR", {
@@ -74,35 +73,13 @@ async function setupSupabase() {
   supabaseClient = window.supabase.createClient(
     supabaseConfig.url,
     supabaseConfig.publishableKey,
-    {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    },
   );
 
-  const { data } = await supabaseClient.auth.getSession();
-  state.session = data.session;
   state.storageMode = "supabase";
-
-  supabaseClient.auth.onAuthStateChange((_event, session) => {
-    state.session = session;
-    loadEntries().then(() => {
-      renderAuth();
-      render();
-    });
-  });
 }
 
 async function loadEntries() {
   if (state.storageMode === "supabase") {
-    if (!state.session) {
-      state.entries = [];
-      return;
-    }
-
     const { data, error } = await supabaseClient
       .from("entries")
       .select("id, category, value, direction, date, note, created_at")
@@ -237,27 +214,20 @@ function render() {
 }
 
 function renderAuth() {
-  const email = state.session?.user?.email;
   const isSupabase = state.storageMode === "supabase";
-  const authenticated = Boolean(email);
 
   document.querySelector("#authStatus").textContent = isSupabase
-    ? authenticated
-      ? `Conectado como ${email}.`
-      : "Entre por e-mail para visualizar e inserir dados persistentes."
+    ? "Acesso direto: visualize e insira dados sem login."
     : "Modo local temporário: os dados ficam neste navegador.";
 
-  document.querySelector("#authEmailLabel").classList.toggle("is-hidden", authenticated);
-  document.querySelector("#loginButton").classList.toggle("is-hidden", authenticated);
-  document.querySelector("#logoutButton").classList.toggle("is-hidden", !authenticated);
   document.querySelector("#storageLabel").textContent = isSupabase ? "Supabase" : "Local";
   document.querySelector("#storageDetail").textContent = isSupabase
-    ? "Dados persistentes por usuário autenticado."
+    ? "Dados persistentes sem login nesta versão."
     : "Fallback temporário no navegador.";
 
   const formFields = document.querySelectorAll("#entryForm input, #entryForm select, #entryForm button");
   formFields.forEach((field) => {
-    field.disabled = isSupabase && !authenticated;
+    field.disabled = false;
   });
 }
 
@@ -447,8 +417,6 @@ function renderEntryHistory() {
 async function handleEntrySubmit(event) {
   event.preventDefault();
 
-  if (state.storageMode === "supabase" && !state.session) return;
-
   const value = Number(document.querySelector("#entryValue").value);
   if (!Number.isFinite(value) || value <= 0) return;
 
@@ -516,24 +484,6 @@ async function clearEntries() {
   render();
 }
 
-async function handleLogin() {
-  if (state.storageMode !== "supabase") return;
-
-  const email = document.querySelector("#authEmail").value.trim();
-  if (!email) return;
-
-  const { error } = await supabaseClient.auth.signInWithOtp({ email });
-
-  document.querySelector("#authStatus").textContent = error
-    ? "Não foi possível enviar o link de acesso."
-    : "Enviamos um link de acesso para o seu e-mail.";
-}
-
-async function handleLogout() {
-  if (state.storageMode !== "supabase") return;
-  await supabaseClient.auth.signOut();
-}
-
 function formatTableValue(value) {
   if (!value) return "-";
   return currency.format(value);
@@ -575,8 +525,6 @@ document.querySelector("#monthFilter").addEventListener("change", (event) => {
 
 document.querySelector("#entryForm").addEventListener("submit", handleEntrySubmit);
 document.querySelector("#clearEntriesButton").addEventListener("click", clearEntries);
-document.querySelector("#loginButton").addEventListener("click", handleLogin);
-document.querySelector("#logoutButton").addEventListener("click", handleLogout);
 window.addEventListener("resize", () => {
   if (state.activeView === "viewData") renderCharts();
 });
