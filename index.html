@@ -114,6 +114,7 @@
                 <div>
                   <p class="eyebrow">Destaque</p>
                   <h3 id="spreadsheetTitle">Tabela mensal no formato da planilha</h3>
+                  <p class="table-help">Clique em um valor com lançamento para editar seus dados.</p>
                 </div>
                 <span class="pill" id="entryCount">0 lançamentos inseridos</span>
               </div>
@@ -224,6 +225,7 @@
                       <th>Tipo</th>
                       <th class="amount-cell">Valor</th>
                       <th>Observação</th>
+                      <th class="actions-cell">Ações</th>
                     </tr>
                   </thead>
                   <tbody id="entryRows"></tbody>
@@ -234,6 +236,62 @@
         </div>
       </section>
     </main>
+
+    <dialog class="entry-dialog" id="editEntryDialog" aria-labelledby="editEntryTitle">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">Editar lançamento</p>
+          <h2 id="editEntryTitle">Atualizar dados</h2>
+        </div>
+        <button class="dialog-close-button" id="closeEditDialogButton" type="button" aria-label="Fechar editor">
+          Fechar
+        </button>
+      </div>
+
+      <form id="editEntryForm">
+        <label class="full-field is-hidden" id="editEntryPickerField">
+          <span>Lançamento desta célula</span>
+          <select id="editEntryPicker"></select>
+        </label>
+
+        <div class="form-grid edit-form-grid">
+          <label>
+            <span>Opção da planilha</span>
+            <select id="editEntryCategory" required></select>
+          </label>
+
+          <label>
+            <span>Valor</span>
+            <input id="editEntryValue" type="number" min="0" step="0.01" required />
+          </label>
+
+          <label>
+            <span>Débito ou crédito</span>
+            <select id="editEntryDirection" required>
+              <option value="debit">Débito</option>
+              <option value="credit">Crédito</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Data</span>
+            <input id="editEntryDate" type="date" required />
+          </label>
+        </div>
+
+        <label class="full-field">
+          <span>Observação</span>
+          <input id="editEntryNote" type="text" placeholder="Opcional" />
+        </label>
+
+        <p class="form-feedback" id="editEntryFeedback" role="status" aria-live="polite"></p>
+
+        <div class="form-actions dialog-actions">
+          <button type="submit" id="saveEditEntryButton">Salvar alterações</button>
+          <button class="secondary-button" id="cancelEditEntryButton" type="button">Cancelar</button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="script.js"></script>

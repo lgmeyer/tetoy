@@ -38,6 +38,7 @@ const state = {
   selectedMonth: "ago",
   entries: [],
   storageMode: "browser",
+  editingEntryId: null,
 };
 
 const currency = new Intl.NumberFormat("pt-BR", {
@@ -146,6 +147,12 @@ function entryValueFor(category, monthKey) {
     .reduce((total, entry) => total + entry.value, 0);
 }
 
+function entriesForCell(category, monthKey) {
+  return state.entries.filter(
+    (entry) => entry.category === category && getMonthFromDate(entry.date) === monthKey,
+  );
+}
+
 function valueFor(category, monthKey) {
   return baseValueFor(category, monthKey) + entryValueFor(category, monthKey);
 }
@@ -198,9 +205,11 @@ function populateControls() {
   monthFilter.value = state.selectedMonth;
 
   const categorySelect = document.querySelector("#entryCategory");
-  categorySelect.innerHTML = categoryOptions()
+  const categoryMarkup = categoryOptions()
     .map((category) => `<option value="${category}">${category}</option>`)
     .join("");
+  categorySelect.innerHTML = categoryMarkup;
+  document.querySelector("#editEntryCategory").innerHTML = categoryMarkup;
 
   document.querySelector("#entryDate").value = new Date().toISOString().slice(0, 10);
 }
@@ -209,7 +218,7 @@ function render() {
   renderAuth();
   renderMetrics();
   renderSpreadsheet();
-  renderCharts();
+  if (state.activeView === "viewData") renderCharts();
   renderEntryHistory();
 }
 
@@ -262,7 +271,27 @@ function renderSpreadsheet() {
           .map((month) => {
             const value = valueFor(row.category, month.key);
             const highlight = month.key === state.selectedMonth ? " selected-month" : "";
-            return `<td class="amount-cell${highlight}">${formatTableValue(value)}</td>`;
+            const cellEntries = entriesForCell(row.category, month.key);
+
+            if (!cellEntries.length) {
+              return `<td class="amount-cell${highlight}">${formatTableValue(value)}</td>`;
+            }
+
+            const entryLabel = cellEntries.length === 1 ? "1 lançamento" : `${cellEntries.length} lançamentos`;
+            return `
+              <td class="amount-cell editable-spreadsheet-cell${highlight}">
+                <button
+                  class="spreadsheet-edit-button"
+                  type="button"
+                  data-category="${escapeAttribute(row.category)}"
+                  data-month="${month.key}"
+                  aria-label="Editar ${entryLabel} de ${escapeAttribute(row.category)} em ${month.label}"
+                >
+                  <span>${formatTableValue(value)}</span>
+                  <small>${entryLabel}</small>
+                </button>
+              </td>
+            `;
           })
           .join("")}
         <td class="amount-cell total-cell">${formatTableValue(rowTotal(row.category))}</td>
@@ -324,6 +353,8 @@ function drawBarChart(canvas, items, options) {
   const pixelRatio = window.devicePixelRatio || 1;
   const bounds = canvas.getBoundingClientRect();
   const chartHeight = 260;
+
+  if (bounds.width <= 0) return;
 
   canvas.width = Math.max(1, bounds.width * pixelRatio);
   canvas.height = chartHeight * pixelRatio;
@@ -390,7 +421,7 @@ function renderEntryHistory() {
   if (!state.entries.length) {
     rows.innerHTML = `
       <tr>
-        <td colspan="5" class="empty-table-cell">Nenhum lançamento inserido ainda.</td>
+        <td colspan="6" class="empty-table-cell">Nenhum lançamento inserido ainda.</td>
       </tr>
     `;
     return;
@@ -404,14 +435,148 @@ function renderEntryHistory() {
       return `
         <tr>
           <td>${shortDate.format(new Date(`${entry.date}T12:00:00`))}</td>
-          <td>${entry.category}</td>
+          <td>${escapeHtml(entry.category)}</td>
           <td><span class="status ${entry.direction === "credit" ? "ok" : "missing"}">${typeLabel}</span></td>
           <td class="amount-cell ${amountClass}">${currency.format(entry.value)}</td>
-          <td>${entry.note || "-"}</td>
+          <td>${escapeHtml(entry.note || "-")}</td>
+          <td class="actions-cell">
+            <button class="edit-entry-button" type="button" data-entry-id="${escapeAttribute(String(entry.id))}">
+              Editar
+            </button>
+          </td>
         </tr>
       `;
     })
     .join("");
+}
+
+function openEntryEditor(entryIds) {
+  const entries = entryIds
+    .map((entryId) => state.entries.find((entry) => String(entry.id) === String(entryId)))
+    .filter(Boolean);
+
+  if (!entries.length) return;
+
+  const pickerField = document.querySelector("#editEntryPickerField");
+  const picker = document.querySelector("#editEntryPicker");
+  pickerField.classList.toggle("is-hidden", entries.length === 1);
+  picker.innerHTML = entries
+    .map((entry) => {
+      const typeLabel = entry.direction === "credit" ? "Crédito" : "Débito";
+      const label = `${formatDate(entry.date)} · ${typeLabel} · ${currency.format(entry.value)}${entry.note ? ` · ${entry.note}` : ""}`;
+      return `<option value="${escapeAttribute(String(entry.id))}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+
+  fillEntryEditor(entries[0]);
+  document.querySelector("#editEntryFeedback").textContent = "";
+
+  const dialog = document.querySelector("#editEntryDialog");
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function fillEntryEditor(entry) {
+  state.editingEntryId = entry.id;
+  document.querySelector("#editEntryPicker").value = String(entry.id);
+  document.querySelector("#editEntryCategory").value = entry.category;
+  document.querySelector("#editEntryValue").value = entry.value;
+  document.querySelector("#editEntryDirection").value = entry.direction;
+  document.querySelector("#editEntryDate").value = entry.date;
+  document.querySelector("#editEntryNote").value = entry.note || "";
+}
+
+function closeEntryEditor() {
+  const dialog = document.querySelector("#editEntryDialog");
+  if (dialog.open && typeof dialog.close === "function") {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+    resetEntryEditor();
+  }
+}
+
+function resetEntryEditor() {
+  state.editingEntryId = null;
+  document.querySelector("#editEntryForm").reset();
+  document.querySelector("#editEntryFeedback").textContent = "";
+}
+
+async function handleEditEntrySubmit(event) {
+  event.preventDefault();
+
+  const value = Number(document.querySelector("#editEntryValue").value);
+  const feedback = document.querySelector("#editEntryFeedback");
+  const submitButton = document.querySelector("#saveEditEntryButton");
+
+  if (!state.editingEntryId || !Number.isFinite(value) || value <= 0) {
+    feedback.textContent = "Informe um valor maior que zero.";
+    return;
+  }
+
+  const changes = {
+    category: document.querySelector("#editEntryCategory").value,
+    value,
+    direction: document.querySelector("#editEntryDirection").value,
+    date: document.querySelector("#editEntryDate").value,
+    note: document.querySelector("#editEntryNote").value.trim(),
+  };
+
+  submitButton.disabled = true;
+  feedback.textContent = "Salvando alterações…";
+
+  try {
+    const updatedEntry = await updateEntry(state.editingEntryId, changes);
+    state.entries = state.entries.map((entry) =>
+      String(entry.id) === String(updatedEntry.id) ? updatedEntry : entry,
+    );
+
+    if (state.storageMode === "browser") saveFallbackEntries();
+
+    render();
+    closeEntryEditor();
+  } catch (error) {
+    console.warn("Erro ao atualizar lançamento:", error);
+    feedback.textContent = error.message || "Não foi possível salvar as alterações.";
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
+async function updateEntry(entryId, changes) {
+  if (state.storageMode === "supabase") {
+    const { data, error } = await supabaseClient
+      .from("entries")
+      .update(changes)
+      .eq("id", entryId)
+      .select("id, category, value, direction, date, note, created_at")
+      .single();
+
+    if (error) throw new Error(error.message || "Não foi possível atualizar no Supabase.");
+    return normalizeSupabaseEntry(data);
+  }
+
+  if (state.storageMode === "api") {
+    const response = await fetch(`/api/entries/${encodeURIComponent(entryId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(payload.message || "Não foi possível atualizar o lançamento.");
+    }
+
+    return payload.entry;
+  }
+
+  const currentEntry = state.entries.find((entry) => String(entry.id) === String(entryId));
+  if (!currentEntry) throw new Error("Lançamento não encontrado.");
+  return { ...currentEntry, ...changes };
 }
 
 async function handleEntrySubmit(event) {
@@ -489,6 +654,23 @@ function formatTableValue(value) {
   return currency.format(value);
 }
 
+function formatDate(dateValue) {
+  return shortDate.format(new Date(`${dateValue}T12:00:00`));
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value);
+}
+
 function compactCurrency(value) {
   if (value >= 1000) return `R$ ${Math.round(value / 1000)} mil`;
   return currency.format(value);
@@ -525,6 +707,27 @@ document.querySelector("#monthFilter").addEventListener("change", (event) => {
 
 document.querySelector("#entryForm").addEventListener("submit", handleEntrySubmit);
 document.querySelector("#clearEntriesButton").addEventListener("click", clearEntries);
+document.querySelector("#entryRows").addEventListener("click", (event) => {
+  const button = event.target.closest(".edit-entry-button");
+  if (button) openEntryEditor([button.dataset.entryId]);
+});
+document.querySelector("#spreadsheetRows").addEventListener("click", (event) => {
+  const button = event.target.closest(".spreadsheet-edit-button");
+  if (!button) return;
+
+  const entryIds = entriesForCell(button.dataset.category, button.dataset.month).map(
+    (entry) => entry.id,
+  );
+  openEntryEditor(entryIds);
+});
+document.querySelector("#editEntryPicker").addEventListener("change", (event) => {
+  const entry = state.entries.find((item) => String(item.id) === event.target.value);
+  if (entry) fillEntryEditor(entry);
+});
+document.querySelector("#editEntryForm").addEventListener("submit", handleEditEntrySubmit);
+document.querySelector("#closeEditDialogButton").addEventListener("click", closeEntryEditor);
+document.querySelector("#cancelEditEntryButton").addEventListener("click", closeEntryEditor);
+document.querySelector("#editEntryDialog").addEventListener("close", resetEntryEditor);
 window.addEventListener("resize", () => {
   if (state.activeView === "viewData") renderCharts();
 });
