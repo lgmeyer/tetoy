@@ -33,6 +33,12 @@
             <strong>Novo lançamento</strong>
             <small>Informe opção, valor, débito ou crédito e data.</small>
           </button>
+
+          <button class="choice-card" type="button" data-view-target="importAsaas">
+            <span>Importar extrato</span>
+            <strong>Receita líquida Asaas</strong>
+            <small>Envie o CSV mensal e confira o cálculo antes de lançar.</small>
+          </button>
         </div>
       </section>
 
@@ -54,6 +60,9 @@
             </button>
             <button class="nav-item" type="button" data-view-target="insertData">
               Inserir dados
+            </button>
+            <button class="nav-item" type="button" data-view-target="importAsaas">
+              Importar extrato Asaas
             </button>
           </nav>
 
@@ -233,6 +242,87 @@
               </div>
             </section>
           </section>
+
+          <section class="view-panel is-hidden" id="importAsaas">
+            <header class="topbar">
+              <div>
+                <p class="eyebrow">Importar extrato</p>
+                <h2>Receita líquida do Asaas</h2>
+              </div>
+            </header>
+
+            <section class="panel import-panel" aria-labelledby="asaasImportTitle">
+              <div class="import-intro">
+                <div>
+                  <h3 id="asaasImportTitle">Selecione o extrato mensal em CSV</h3>
+                  <p>
+                    O cálculo soma as cobranças recebidas, desconta todas as taxas e ignora
+                    retiradas via Pix e os demais movimentos.
+                  </p>
+                </div>
+                <span class="privacy-note">O arquivo é processado neste navegador</span>
+              </div>
+
+              <label class="upload-field" for="asaasCsvFile">
+                <span>Arquivo do extrato Asaas</span>
+                <input id="asaasCsvFile" type="file" accept=".csv,text/csv" />
+                <small>Use um extrato que contenha somente um mês calendário.</small>
+              </label>
+
+              <p class="import-feedback" id="asaasImportFeedback" role="status" aria-live="polite"></p>
+            </section>
+
+            <section class="panel import-preview is-hidden" id="asaasPreview" aria-labelledby="asaasPreviewTitle">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Prévia do lançamento</p>
+                  <h3 id="asaasPreviewTitle">Conferência da receita</h3>
+                  <p class="table-help" id="asaasPreviewPeriod"></p>
+                </div>
+                <span class="pill" id="asaasPreviewFile"></span>
+              </div>
+
+              <div class="import-metric-grid" aria-label="Cálculo da receita líquida">
+                <article class="import-metric">
+                  <span>Cobranças recebidas</span>
+                  <strong id="asaasGrossRevenue">R$ 0,00</strong>
+                  <small id="asaasChargeCount">0 cobranças</small>
+                </article>
+                <article class="import-metric fee">
+                  <span>Taxas descontadas</span>
+                  <strong id="asaasFeesTotal">R$ 0,00</strong>
+                  <small id="asaasFeeCount">0 taxas</small>
+                </article>
+                <article class="import-metric net">
+                  <span>Receita líquida</span>
+                  <strong id="asaasNetRevenue">R$ 0,00</strong>
+                  <small>Cobranças menos custos operacionais</small>
+                </article>
+              </div>
+
+              <dl class="import-breakdown">
+                <div>
+                  <dt>Transações via Pix ignoradas</dt>
+                  <dd id="asaasPixIgnored">0 retiradas</dd>
+                </div>
+                <div>
+                  <dt>Outros movimentos ignorados</dt>
+                  <dd id="asaasOtherIgnored">0 movimentos</dd>
+                </div>
+                <div>
+                  <dt>Destino do lançamento</dt>
+                  <dd>RECEITA · Crédito · último dia do período</dd>
+                </div>
+              </dl>
+
+              <div class="form-actions import-actions">
+                <button id="saveAsaasRevenueButton" type="button">Lançar receita líquida</button>
+                <button class="secondary-button" type="button" data-view-target="viewData">
+                  Ver planilha
+                </button>
+              </div>
+            </section>
+          </section>
         </div>
       </section>
     </main>
@@ -293,6 +383,7 @@
       </form>
     </dialog>
 
+    <script src="asaas-csv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="script.js"></script>
   </body>
