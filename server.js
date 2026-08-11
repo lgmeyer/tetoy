@@ -40,6 +40,12 @@ createServer(async (request, response) => {
       return;
     }
 
+    const entryMatch = url.pathname.match(/^\/api\/entries\/(\d+)$/);
+    if (entryMatch && request.method === "PUT") {
+      await handleUpdateEntry(request, response, Number(entryMatch[1]));
+      return;
+    }
+
     if (url.pathname === "/api/entries" && request.method === "DELETE") {
       handleDeleteEntries(response);
       return;
@@ -147,6 +153,51 @@ async function handleCreateEntry(request, response) {
     .get(result.lastInsertRowid);
 
   sendJson(response, 201, { entry });
+}
+
+async function handleUpdateEntry(request, response, entryId) {
+  const payload = await readJsonRequest(request);
+  const validationError = validateEntryPayload(payload);
+
+  if (!Number.isSafeInteger(entryId) || entryId <= 0) {
+    sendJson(response, 400, { error: "invalid_entry_id", message: "Lançamento inválido." });
+    return;
+  }
+
+  if (validationError) {
+    sendJson(response, 400, { error: "invalid_entry", message: validationError });
+    return;
+  }
+
+  const result = database
+    .prepare(`
+      UPDATE entries
+      SET category = ?, value = ?, direction = ?, date = ?, note = ?
+      WHERE id = ?
+    `)
+    .run(
+      payload.category.trim(),
+      Number(payload.value),
+      payload.direction,
+      payload.date,
+      (payload.note || "").trim(),
+      entryId,
+    );
+
+  if (result.changes === 0) {
+    sendJson(response, 404, { error: "entry_not_found", message: "Lançamento não encontrado." });
+    return;
+  }
+
+  const entry = database
+    .prepare(`
+      SELECT id, category, value, direction, date, note, created_at AS createdAt
+      FROM entries
+      WHERE id = ?
+    `)
+    .get(entryId);
+
+  sendJson(response, 200, { entry });
 }
 
 function handleDeleteEntries(response) {

@@ -416,6 +416,12 @@ select {
   margin-bottom: 16px;
 }
 
+.table-help {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -502,6 +508,38 @@ td {
   background: var(--blue-soft);
 }
 
+.editable-spreadsheet-cell {
+  padding: 0;
+}
+
+.spreadsheet-edit-button {
+  display: grid;
+  width: 100%;
+  min-height: 62px;
+  justify-items: end;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 0;
+  color: var(--blue);
+  background: transparent;
+  font-weight: 850;
+}
+
+.spreadsheet-edit-button small {
+  color: var(--muted);
+  font-size: 0.67rem;
+  font-weight: 750;
+}
+
+.spreadsheet-edit-button:hover,
+.spreadsheet-edit-button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -3px;
+  background: rgba(44, 111, 187, 0.08);
+}
+
 .amount-income {
   color: var(--green);
   font-weight: 850;
@@ -581,6 +619,71 @@ input {
   margin-top: 18px;
 }
 
+.actions-cell {
+  width: 94px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.edit-entry-button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: var(--blue);
+  border-color: var(--blue-soft);
+  background: var(--blue-soft);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.edit-entry-button:hover {
+  border-color: var(--blue);
+}
+
+.entry-dialog {
+  width: min(760px, calc(100% - 28px));
+  max-height: calc(100vh - 28px);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 24px 80px rgba(24, 36, 53, 0.24);
+}
+
+.entry-dialog::backdrop {
+  background: rgba(14, 24, 36, 0.62);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.dialog-close-button {
+  padding: 0 12px;
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+.edit-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-feedback {
+  min-height: 22px;
+  margin: 12px 0 0;
+  color: var(--red);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.dialog-actions {
+  justify-content: flex-end;
+}
+
 .empty-table-cell {
   color: var(--muted);
   text-align: center;
@@ -613,6 +716,7 @@ input {
   .topbar,
   .toolbar,
   .panel-header,
+  .dialog-header,
   .form-actions {
     align-items: stretch;
     flex-direction: column;
@@ -626,7 +730,8 @@ input {
   .choice-grid,
   .metric-grid,
   .content-grid,
-  .form-grid {
+  .form-grid,
+  .edit-form-grid {
     grid-template-columns: 1fr;
   }
 
