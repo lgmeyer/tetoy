@@ -118,7 +118,7 @@ h3 {
 
 .choice-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(240px, 380px));
+  grid-template-columns: repeat(3, minmax(240px, 340px));
   justify-content: center;
   gap: 18px;
 }
@@ -684,6 +684,162 @@ input {
   justify-content: flex-end;
 }
 
+.import-panel + .import-preview {
+  margin-top: 18px;
+}
+
+.import-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.import-intro p {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.privacy-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: var(--green);
+  background: var(--green-soft);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.upload-field {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px dashed #91a7bf;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.upload-field input {
+  height: auto;
+  min-height: 46px;
+  padding: 7px;
+  border-style: solid;
+  background: var(--surface);
+}
+
+.upload-field input::file-selector-button {
+  min-height: 30px;
+  margin-right: 10px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  background: var(--blue);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.upload-field small {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.import-feedback {
+  min-height: 22px;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.import-feedback[data-tone="error"] {
+  color: var(--red);
+}
+
+.import-feedback[data-tone="success"] {
+  color: var(--green);
+}
+
+.import-feedback[data-tone="warning"] {
+  color: var(--amber);
+}
+
+.import-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.import-metric {
+  min-height: 122px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.import-metric span,
+.import-metric small {
+  display: block;
+  color: var(--muted);
+}
+
+.import-metric span {
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.import-metric strong {
+  display: block;
+  margin: 12px 0 7px;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+}
+
+.import-metric.fee strong {
+  color: var(--red);
+}
+
+.import-metric.net {
+  border-color: #8bc9ae;
+  background: var(--green-soft);
+}
+
+.import-metric.net strong {
+  color: var(--green);
+}
+
+.import-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+}
+
+.import-breakdown div {
+  padding: 12px;
+  border-left: 3px solid var(--line);
+}
+
+.import-breakdown dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.import-breakdown dd {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.import-actions {
+  justify-content: flex-end;
+}
+
 .empty-table-cell {
   color: var(--muted);
   text-align: center;
@@ -704,6 +860,10 @@ input {
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .choice-grid {
+    grid-template-columns: repeat(2, minmax(240px, 340px));
+  }
 }
 
 @media (max-width: 760px) {
@@ -717,6 +877,7 @@ input {
   .toolbar,
   .panel-header,
   .dialog-header,
+  .import-intro,
   .form-actions {
     align-items: stretch;
     flex-direction: column;
@@ -731,7 +892,9 @@ input {
   .metric-grid,
   .content-grid,
   .form-grid,
-  .edit-form-grid {
+  .edit-form-grid,
+  .import-metric-grid,
+  .import-breakdown {
     grid-template-columns: 1fr;
   }
 

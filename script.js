@@ -39,6 +39,8 @@ const state = {
   entries: [],
   storageMode: "browser",
   editingEntryId: null,
+  asaasImportData: null,
+  asaasImportFileName: "",
 };
 
 const currency = new Intl.NumberFormat("pt-BR", {
@@ -220,6 +222,7 @@ function render() {
   renderSpreadsheet();
   if (state.activeView === "viewData") renderCharts();
   renderEntryHistory();
+  if (state.asaasImportData) renderAsaasPreview();
 }
 
 function renderAuth() {
@@ -242,6 +245,7 @@ function renderAuth() {
 
 function renderMetrics() {
   const selectedMonth = months.find((month) => month.key === state.selectedMonth);
+  document.querySelector("#monthFilter").value = state.selectedMonth;
   document.querySelector("#selectedMonthTotal").textContent = currency.format(
     monthTotal(state.selectedMonth),
   );
@@ -579,6 +583,39 @@ async function updateEntry(entryId, changes) {
   return { ...currentEntry, ...changes };
 }
 
+async function createEntry(entry) {
+  if (state.storageMode === "supabase") {
+    const { data, error } = await supabaseClient
+      .from("entries")
+      .insert(entry)
+      .select("id, category, value, direction, date, note, created_at")
+      .single();
+
+    if (error) throw new Error(error.message || "Não foi possível salvar no Supabase.");
+    return normalizeSupabaseEntry(data);
+  }
+
+  if (state.storageMode === "api") {
+    const response = await fetch("/api/entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(payload.message || "Não foi possível salvar o lançamento.");
+    }
+
+    return payload.entry;
+  }
+
+  return {
+    id: globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now()),
+    ...entry,
+  };
+}
+
 async function handleEntrySubmit(event) {
   event.preventDefault();
 
@@ -593,41 +630,173 @@ async function handleEntrySubmit(event) {
     note: document.querySelector("#entryNote").value.trim(),
   };
 
-  if (state.storageMode === "supabase") {
-    const { data, error } = await supabaseClient
-      .from("entries")
-      .insert(entry)
-      .select("id, category, value, direction, date, note, created_at")
-      .single();
-
-    if (error) {
-      console.warn("Erro ao salvar no Supabase:", error);
-      return;
-    }
-
-    state.entries.push(normalizeSupabaseEntry(data));
-  } else if (state.storageMode === "api") {
-    const response = await fetch("/api/entries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(entry),
-    });
-
-    if (!response.ok) return;
-
-    const payload = await response.json();
-    state.entries.push(payload.entry);
-  } else {
-    state.entries.push({
-      id: globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now()),
-      ...entry,
-    });
-    saveFallbackEntries();
+  try {
+    state.entries.push(await createEntry(entry));
+    if (state.storageMode === "browser") saveFallbackEntries();
+  } catch (error) {
+    console.warn("Erro ao salvar lançamento:", error);
+    return;
   }
 
   event.target.reset();
   document.querySelector("#entryDate").value = new Date().toISOString().slice(0, 10);
   showWorkspaceView("viewData");
+}
+
+async function handleAsaasFileChange(event) {
+  const file = event.target.files?.[0];
+  state.asaasImportData = null;
+  state.asaasImportFileName = "";
+  document.querySelector("#asaasPreview").classList.add("is-hidden");
+
+  if (!file) {
+    setAsaasImportFeedback("");
+    return;
+  }
+
+  setAsaasImportFeedback("Processando o extrato…");
+
+  try {
+    if (!globalThis.AsaasCsv?.parseAsaasStatement) {
+      throw new Error("O processador de extratos não foi carregado.");
+    }
+
+    state.asaasImportData = globalThis.AsaasCsv.parseAsaasStatement(await file.text());
+    state.asaasImportFileName = file.name;
+    renderAsaasPreview();
+  } catch (error) {
+    console.warn("Erro ao processar extrato Asaas:", error);
+    setAsaasImportFeedback(error.message || "Não foi possível processar o arquivo.", "error");
+  }
+}
+
+function renderAsaasPreview() {
+  const data = state.asaasImportData;
+  const preview = document.querySelector("#asaasPreview");
+  if (!data) {
+    preview.classList.add("is-hidden");
+    return;
+  }
+
+  preview.classList.remove("is-hidden");
+  document.querySelector("#asaasPreviewPeriod").textContent = `Período: ${data.period.label}`;
+  document.querySelector("#asaasPreviewFile").textContent = state.asaasImportFileName;
+  document.querySelector("#asaasGrossRevenue").textContent = currency.format(data.grossRevenue);
+  document.querySelector("#asaasFeesTotal").textContent = `− ${currency.format(data.feesTotal)}`;
+  document.querySelector("#asaasNetRevenue").textContent = currency.format(data.netRevenue);
+  document.querySelector("#asaasChargeCount").textContent = countLabel(
+    data.chargeCount,
+    "cobrança",
+    "cobranças",
+  );
+  document.querySelector("#asaasFeeCount").textContent = countLabel(data.feeCount, "taxa", "taxas");
+  document.querySelector("#asaasPixIgnored").textContent = `${countLabel(
+    data.pixWithdrawalCount,
+    "retirada",
+    "retiradas",
+  )} · ${currency.format(Math.abs(data.pixWithdrawalsTotal))}`;
+  document.querySelector("#asaasOtherIgnored").textContent = `${countLabel(
+    data.otherMovementCount,
+    "movimento",
+    "movimentos",
+  )} · ${currency.format(Math.abs(data.otherMovementsTotal))}`;
+
+  const existingEntry = findAsaasImportEntry(data.period.key);
+  const saveButton = document.querySelector("#saveAsaasRevenueButton");
+  saveButton.textContent = existingEntry
+    ? "Atualizar receita já lançada"
+    : "Lançar receita líquida";
+  saveButton.disabled = false;
+
+  if (data.positiveFeeCount) {
+    setAsaasImportFeedback(
+      "Atenção: há taxas com valor positivo. Elas foram tratadas como custo pelo valor absoluto.",
+      "warning",
+    );
+  } else if (existingEntry) {
+    setAsaasImportFeedback(
+      "Já existe uma importação deste período. O lançamento existente será atualizado, sem duplicação.",
+      "warning",
+    );
+  } else {
+    setAsaasImportFeedback("Extrato processado. Confira a prévia antes de lançar.");
+  }
+}
+
+async function saveAsaasRevenue() {
+  const data = state.asaasImportData;
+  if (!data) return;
+
+  const saveButton = document.querySelector("#saveAsaasRevenueButton");
+  const existingEntry = findAsaasImportEntry(data.period.key);
+  const entry = {
+    category: "RECEITA",
+    value: data.netRevenue,
+    direction: "credit",
+    date: data.period.end,
+    note: buildAsaasImportNote(data, state.asaasImportFileName),
+  };
+
+  saveButton.disabled = true;
+  setAsaasImportFeedback(existingEntry ? "Atualizando lançamento…" : "Salvando lançamento…");
+
+  try {
+    if (existingEntry) {
+      const updatedEntry = await updateEntry(existingEntry.id, entry);
+      state.entries = state.entries.map((item) =>
+        String(item.id) === String(updatedEntry.id) ? updatedEntry : item,
+      );
+    } else {
+      state.entries.push(await createEntry(entry));
+    }
+
+    if (state.storageMode === "browser") saveFallbackEntries();
+
+    state.selectedMonth = months[Number(data.period.key.slice(5, 7)) - 1]?.key || state.selectedMonth;
+    render();
+    setAsaasImportFeedback(
+      existingEntry
+        ? "Receita líquida atualizada com sucesso, sem criar duplicidade."
+        : "Receita líquida lançada com sucesso.",
+      "success",
+    );
+  } catch (error) {
+    console.warn("Erro ao salvar receita Asaas:", error);
+    setAsaasImportFeedback(error.message || "Não foi possível salvar a receita líquida.", "error");
+    saveButton.disabled = false;
+  }
+}
+
+function findAsaasImportEntry(periodKey) {
+  const marker = `Importação Asaas ${periodKey} |`;
+  return state.entries.find(
+    (entry) => entry.category === "RECEITA"
+      && entry.direction === "credit"
+      && String(entry.note || "").startsWith(marker),
+  );
+}
+
+function buildAsaasImportNote(data, fileName) {
+  return [
+    `Importação Asaas ${data.period.key}`,
+    `${data.chargeCount} cobranças: ${currency.format(data.grossRevenue)}`,
+    `${data.feeCount} taxas: ${currency.format(data.feesTotal)}`,
+    `arquivo: ${fileName}`,
+  ].join(" | ");
+}
+
+function setAsaasImportFeedback(message, tone = "") {
+  const feedback = document.querySelector("#asaasImportFeedback");
+  feedback.textContent = message;
+  if (tone) {
+    feedback.dataset.tone = tone;
+  } else {
+    delete feedback.dataset.tone;
+  }
+}
+
+function countLabel(value, singular, plural) {
+  return `${value} ${value === 1 ? singular : plural}`;
 }
 
 async function clearEntries() {
@@ -707,6 +876,8 @@ document.querySelector("#monthFilter").addEventListener("change", (event) => {
 
 document.querySelector("#entryForm").addEventListener("submit", handleEntrySubmit);
 document.querySelector("#clearEntriesButton").addEventListener("click", clearEntries);
+document.querySelector("#asaasCsvFile").addEventListener("change", handleAsaasFileChange);
+document.querySelector("#saveAsaasRevenueButton").addEventListener("click", saveAsaasRevenue);
 document.querySelector("#entryRows").addEventListener("click", (event) => {
   const button = event.target.closest(".edit-entry-button");
   if (button) openEntryEditor([button.dataset.entryId]);
