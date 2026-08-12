@@ -14,15 +14,15 @@ const months = [
 ];
 
 const spreadsheetRows = [
-  { category: "SN CONTABILIDADE", values: {} },
-  { category: "ASAAS MARKETING", values: {} },
-  { category: "ASAAS ROYALTIES", values: {} },
-  { category: "SLS LOC OFICINA", values: {} },
-  { category: "PREF.SOROCABA", values: {} },
-  { category: "SLS - GESTÃO DA FROTA", values: {} },
-  { category: "ASAAS - ADESÃO DAS MOTOS", values: {} },
-  { category: "RECEITA", values: {} },
-  { category: "OUTRO", values: {} },
+  { category: "SN CONTABILIDADE", direction: "debit", values: {} },
+  { category: "ASAAS MARKETING", direction: "debit", values: {} },
+  { category: "ASAAS ROYALTIES", direction: "debit", values: {} },
+  { category: "SLS LOC OFICINA", direction: "debit", values: {} },
+  { category: "PREF.SOROCABA", direction: "debit", values: {} },
+  { category: "SLS - GESTÃO DA FROTA", direction: "debit", values: {} },
+  { category: "ASAAS - ADESÃO DAS MOTOS", direction: "debit", values: {} },
+  { category: "RECEITA", direction: "credit", values: {} },
+  { category: "OUTRO", direction: "debit", values: {} },
 ];
 
 const fallbackStorageKey = "tetoy-local-entries";
@@ -53,6 +53,8 @@ const shortDate = new Intl.DateTimeFormat("pt-BR", {
   month: "2-digit",
   year: "numeric",
 });
+
+const { positiveAmount, signedEntryAmount, summarizeEntries } = globalThis.DashboardCalculations;
 
 function loadFallbackEntries() {
   try {
@@ -143,10 +145,16 @@ function baseValueFor(category, monthKey) {
   return spreadsheetRows.find((row) => row.category === category)?.values[monthKey] || 0;
 }
 
+function signedBaseValueFor(category, monthKey) {
+  const row = spreadsheetRows.find((item) => item.category === category);
+  const amount = positiveAmount(row?.values[monthKey]);
+  return row?.direction === "debit" ? -amount : amount;
+}
+
 function entryValueFor(category, monthKey) {
   return state.entries
     .filter((entry) => entry.category === category && getMonthFromDate(entry.date) === monthKey)
-    .reduce((total, entry) => total + entry.value, 0);
+    .reduce((total, entry) => total + signedEntryAmount(entry), 0);
 }
 
 function entriesForCell(category, monthKey) {
@@ -156,7 +164,7 @@ function entriesForCell(category, monthKey) {
 }
 
 function valueFor(category, monthKey) {
-  return baseValueFor(category, monthKey) + entryValueFor(category, monthKey);
+  return signedBaseValueFor(category, monthKey) + entryValueFor(category, monthKey);
 }
 
 function rowTotal(category) {
@@ -167,6 +175,21 @@ function monthTotal(monthKey) {
   return spreadsheetRows.reduce((total, row) => total + valueFor(row.category, monthKey), 0);
 }
 
+function monthBreakdown(monthKey) {
+  const entries = state.entries.filter((entry) => getMonthFromDate(entry.date) === monthKey);
+  const summary = summarizeEntries(entries);
+
+  spreadsheetRows.forEach((row) => {
+    const amount = positiveAmount(baseValueFor(row.category, monthKey));
+    if (!amount) return;
+
+    summary[row.direction] += amount;
+    summary.net += row.direction === "debit" ? -amount : amount;
+  });
+
+  return summary;
+}
+
 function annualTotal() {
   return months.reduce((total, month) => total + monthTotal(month.key), 0);
 }
@@ -174,7 +197,7 @@ function annualTotal() {
 function insertedTotal(direction) {
   return state.entries
     .filter((entry) => entry.direction === direction)
-    .reduce((total, entry) => total + entry.value, 0);
+    .reduce((total, entry) => total + positiveAmount(entry.value), 0);
 }
 
 function showHome() {
@@ -246,11 +269,9 @@ function renderAuth() {
 function renderMetrics() {
   const selectedMonth = months.find((month) => month.key === state.selectedMonth);
   document.querySelector("#monthFilter").value = state.selectedMonth;
-  document.querySelector("#selectedMonthTotal").textContent = currency.format(
-    monthTotal(state.selectedMonth),
-  );
+  setSignedAmount("#selectedMonthTotal", monthTotal(state.selectedMonth));
   document.querySelector("#selectedMonthLabel").textContent = `Total de ${selectedMonth.label}`;
-  document.querySelector("#annualTotal").textContent = currency.format(annualTotal());
+  setSignedAmount("#annualTotal", annualTotal());
   document.querySelector("#creditTotal").textContent = currency.format(insertedTotal("credit"));
   document.querySelector("#debitTotal").textContent = currency.format(insertedTotal("debit"));
 
@@ -275,17 +296,18 @@ function renderSpreadsheet() {
           .map((month) => {
             const value = valueFor(row.category, month.key);
             const highlight = month.key === state.selectedMonth ? " selected-month" : "";
+            const amountTone = amountToneClass(value);
             const cellEntries = entriesForCell(row.category, month.key);
 
             if (!cellEntries.length) {
-              return `<td class="amount-cell${highlight}">${formatTableValue(value)}</td>`;
+              return `<td class="amount-cell${highlight}${amountTone}">${formatTableValue(value)}</td>`;
             }
 
             const entryLabel = cellEntries.length === 1 ? "1 lançamento" : `${cellEntries.length} lançamentos`;
             return `
-              <td class="amount-cell editable-spreadsheet-cell${highlight}">
+              <td class="amount-cell editable-spreadsheet-cell${highlight}${amountTone}">
                 <button
-                  class="spreadsheet-edit-button"
+                  class="spreadsheet-edit-button${amountTone}"
                   type="button"
                   data-category="${escapeAttribute(row.category)}"
                   data-month="${month.key}"
@@ -298,7 +320,7 @@ function renderSpreadsheet() {
             `;
           })
           .join("")}
-        <td class="amount-cell total-cell">${formatTableValue(rowTotal(row.category))}</td>
+        <td class="amount-cell total-cell${amountToneClass(rowTotal(row.category))}">${formatTableValue(rowTotal(row.category))}</td>
       </tr>
     `)
     .join("");
@@ -309,10 +331,11 @@ function renderSpreadsheet() {
       ${months
         .map((month) => {
           const highlight = month.key === state.selectedMonth ? " selected-month" : "";
-          return `<td class="amount-cell total-cell${highlight}">${formatTableValue(monthTotal(month.key))}</td>`;
+          const total = monthTotal(month.key);
+          return `<td class="amount-cell total-cell${highlight}${amountToneClass(total)}">${formatTableValue(total)}</td>`;
         })
         .join("")}
-      <td class="amount-cell grand-total">${formatTableValue(annualTotal())}</td>
+      <td class="amount-cell grand-total${amountToneClass(annualTotal())}">${formatTableValue(annualTotal())}</td>
     </tr>
   `;
 }
@@ -326,15 +349,17 @@ function renderMonthlyChart() {
   const canvas = document.querySelector("#monthlyChart");
   const items = months.map((month) => ({
     label: month.label,
-    value: monthTotal(month.key),
+    ...monthBreakdown(month.key),
     selected: month.key === state.selectedMonth,
   }));
 
-  drawBarChart(canvas, items, {
-    color: "#2c6fbb",
-    selectedColor: "#17202a",
-    maxBars: 12,
-  });
+  canvas.setAttribute(
+    "aria-label",
+    `Gráfico mensal. ${items
+      .map((item) => `${item.label}: crédito ${currency.format(item.credit)}, débito ${currency.format(item.debit)}, resultado ${currency.format(item.net)}`)
+      .join("; ")}.`,
+  );
+  drawMonthlyCashFlowChart(canvas, items);
 }
 
 function renderCategoryChart() {
@@ -349,6 +374,116 @@ function renderCategoryChart() {
     color: "#11875d",
     selectedColor: "#11875d",
     maxBars: 7,
+  });
+}
+
+function drawMonthlyCashFlowChart(canvas, items) {
+  const context = canvas.getContext("2d");
+  const pixelRatio = window.devicePixelRatio || 1;
+  const bounds = canvas.getBoundingClientRect();
+  const chartHeight = 300;
+
+  if (bounds.width <= 0) return;
+
+  canvas.width = Math.max(1, bounds.width * pixelRatio);
+  canvas.height = chartHeight * pixelRatio;
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, bounds.width, chartHeight);
+
+  const padding = { top: 32, right: 16, bottom: 42, left: 62 };
+  const width = bounds.width - padding.left - padding.right;
+  const height = chartHeight - padding.top - padding.bottom;
+  const halfHeight = height / 2;
+  const zeroY = padding.top + halfHeight;
+  const maxMagnitude = Math.max(
+    1,
+    ...items.flatMap((item) => [item.credit, item.debit, Math.abs(item.net)]),
+  ) * 1.14;
+  const groupWidth = width / items.length;
+  const barWidth = Math.min(12, groupWidth * 0.24);
+  const barGap = Math.min(4, groupWidth * 0.08);
+
+  drawSignedGrid(context, padding, width, halfHeight, maxMagnitude, zeroY);
+
+  items.forEach((item, index) => {
+    const groupX = padding.left + index * groupWidth + groupWidth / 2;
+    const creditHeight = (item.credit / maxMagnitude) * halfHeight;
+    const debitHeight = (item.debit / maxMagnitude) * halfHeight;
+
+    context.globalAlpha = item.selected ? 1 : 0.78;
+    context.fillStyle = "#11875d";
+    roundRect(
+      context,
+      groupX - barGap / 2 - barWidth,
+      zeroY - creditHeight,
+      barWidth,
+      creditHeight,
+      4,
+    );
+    context.fill();
+
+    context.fillStyle = "#8b2525";
+    roundRect(context, groupX + barGap / 2, zeroY, barWidth, debitHeight, 4);
+    context.fill();
+    context.globalAlpha = 1;
+
+    context.fillStyle = item.selected ? "#17202a" : "#657384";
+    context.font = `${item.selected ? 850 : 700} 10px Inter, system-ui, sans-serif`;
+    context.textAlign = "center";
+    context.fillText(item.label, groupX, chartHeight - 14);
+  });
+
+  context.beginPath();
+  items.forEach((item, index) => {
+    const x = padding.left + index * groupWidth + groupWidth / 2;
+    const y = zeroY - (item.net / maxMagnitude) * halfHeight;
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.strokeStyle = "#17202a";
+  context.lineWidth = 2;
+  context.stroke();
+
+  items.forEach((item, index) => {
+    const x = padding.left + index * groupWidth + groupWidth / 2;
+    const y = zeroY - (item.net / maxMagnitude) * halfHeight;
+
+    context.beginPath();
+    context.arc(x, y, item.selected ? 4.5 : 3, 0, Math.PI * 2);
+    context.fillStyle = item.selected ? "#2c6fbb" : "#17202a";
+    context.fill();
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 1.5;
+    context.stroke();
+
+    if (item.credit || item.debit) {
+      const labelY = item.net >= 0
+        ? Math.max(padding.top + 8, y - 8)
+        : Math.min(chartHeight - padding.bottom - 3, y + 14);
+      context.fillStyle = item.net < 0 ? "#8b2525" : "#17202a";
+      context.font = "800 9px Inter, system-ui, sans-serif";
+      context.textAlign = "center";
+      context.fillText(compactChartCurrency(item.net), x, labelY);
+    }
+  });
+}
+
+function drawSignedGrid(context, padding, width, halfHeight, maxMagnitude, zeroY) {
+  const steps = [1, 0.5, 0, -0.5, -1];
+
+  context.font = "700 10px Inter, system-ui, sans-serif";
+  context.textAlign = "right";
+
+  steps.forEach((step) => {
+    const y = zeroY - step * halfHeight;
+    context.beginPath();
+    context.moveTo(padding.left, y);
+    context.lineTo(padding.left + width, y);
+    context.strokeStyle = step === 0 ? "#8996a5" : "#d9e0e8";
+    context.lineWidth = step === 0 ? 1.5 : 1;
+    context.stroke();
+    context.fillStyle = step < 0 ? "#8b2525" : "#657384";
+    context.fillText(compactCurrency(maxMagnitude * step), padding.left - 9, y + 4);
   });
 }
 
@@ -823,6 +958,18 @@ function formatTableValue(value) {
   return currency.format(value);
 }
 
+function amountToneClass(value) {
+  if (value < 0) return " amount-expense";
+  if (value > 0) return " amount-income";
+  return "";
+}
+
+function setSignedAmount(selector, value) {
+  const element = document.querySelector(selector);
+  element.textContent = currency.format(value);
+  element.classList.toggle("negative-amount", value < 0);
+}
+
 function formatDate(dateValue) {
   return shortDate.format(new Date(`${dateValue}T12:00:00`));
 }
@@ -841,8 +988,22 @@ function escapeAttribute(value) {
 }
 
 function compactCurrency(value) {
-  if (value >= 1000) return `R$ ${Math.round(value / 1000)} mil`;
+  if (Math.abs(value) >= 1000) {
+    const sign = value < 0 ? "−" : "";
+    return `${sign}R$ ${Math.round(Math.abs(value) / 1000)} mil`;
+  }
   return currency.format(value);
+}
+
+function compactChartCurrency(value) {
+  if (Math.abs(value) >= 1000) {
+    const rounded = (Math.abs(value) / 1000).toLocaleString("pt-BR", {
+      maximumFractionDigits: 1,
+    });
+    return `${value < 0 ? "−" : ""}${rounded} mil`;
+  }
+
+  return Math.round(value).toLocaleString("pt-BR");
 }
 
 function compactLabel(label) {

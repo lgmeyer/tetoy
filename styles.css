@@ -8,6 +8,7 @@
   --green: #11875d;
   --green-soft: #dff4ec;
   --red: #c43d3d;
+  --red-dark: #8b2525;
   --red-soft: #f9e3e3;
   --blue: #2c6fbb;
   --blue-soft: #e4eefb;
@@ -397,7 +398,7 @@ select {
 }
 
 .metric-card.alert strong {
-  color: var(--red);
+  color: var(--red-dark);
 }
 
 .panel {
@@ -445,6 +446,52 @@ select {
   display: block;
   width: 100%;
   min-height: 260px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: -6px 0 10px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--green);
+}
+
+.legend-swatch.debit {
+  background: var(--red-dark);
+}
+
+.legend-line {
+  position: relative;
+  width: 16px;
+  height: 2px;
+  background: var(--ink);
+}
+
+.legend-line::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+  content: "";
+  transform: translate(-50%, -50%);
 }
 
 .table-wrap {
@@ -546,8 +593,12 @@ td {
 }
 
 .amount-expense {
-  color: var(--red);
+  color: var(--red-dark);
   font-weight: 850;
+}
+
+.negative-amount {
+  color: var(--red-dark) !important;
 }
 
 .status {

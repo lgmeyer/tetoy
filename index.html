@@ -142,10 +142,15 @@
                 <div class="panel-header">
                   <div>
                     <p class="eyebrow">Gráfico mensal</p>
-                    <h3>Valores por mês</h3>
+                    <h3>Créditos, débitos e resultado por mês</h3>
                   </div>
                 </div>
-                <canvas id="monthlyChart" height="260" aria-label="Gráfico de valores por mês"></canvas>
+                <div class="chart-legend" aria-label="Legenda do gráfico mensal">
+                  <span><i class="legend-swatch credit"></i>Crédito</span>
+                  <span><i class="legend-swatch debit"></i>Débito</span>
+                  <span><i class="legend-line"></i>Resultado</span>
+                </div>
+                <canvas id="monthlyChart" height="300" aria-label="Gráfico mensal com créditos acima do eixo, débitos abaixo do eixo e linha do resultado líquido"></canvas>
               </article>
 
               <article class="panel chart-panel">
@@ -384,6 +389,7 @@
     </dialog>
 
     <script src="asaas-csv.js"></script>
+    <script src="dashboard-calculations.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="script.js"></script>
   </body>
