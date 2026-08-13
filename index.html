@@ -39,6 +39,12 @@
             <strong>Receita líquida Asaas</strong>
             <small>Envie o CSV mensal e confira o cálculo antes de lançar.</small>
           </button>
+
+          <button class="choice-card" type="button" data-view-target="viabilitySimulation">
+            <span>Simulação de viabilidade</span>
+            <strong>VPL, TIR e Payback</strong>
+            <small>Compare cenários de investimento e salve cada simulação.</small>
+          </button>
         </div>
       </section>
 
@@ -63,6 +69,9 @@
             </button>
             <button class="nav-item" type="button" data-view-target="importAsaas">
               Importar extrato Asaas
+            </button>
+            <button class="nav-item" type="button" data-view-target="viabilitySimulation">
+              Simulação de viabilidade
             </button>
           </nav>
 
@@ -326,6 +335,175 @@
                   Ver planilha
                 </button>
               </div>
+            </section>
+          </section>
+
+          <section class="view-panel is-hidden" id="viabilitySimulation">
+            <header class="topbar">
+              <div>
+                <p class="eyebrow">Simulação de viabilidade</p>
+                <h2>Analise o retorno do projeto</h2>
+                <p class="view-description">
+                  Informe os dados do cenário. Os resultados são atualizados enquanto você preenche.
+                </p>
+              </div>
+              <span class="privacy-note">Cenários salvos neste navegador</span>
+            </header>
+
+            <section class="viability-layout" aria-label="Nova simulação de viabilidade">
+              <article class="panel viability-form-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Novo cenário</p>
+                    <h3>Premissas do projeto</h3>
+                  </div>
+                </div>
+
+                <form id="viabilityForm">
+                  <label>
+                    <span>Nome do cenário</span>
+                    <input
+                      id="viabilityScenarioName"
+                      type="text"
+                      maxlength="80"
+                      placeholder="Ex.: Cenário conservador"
+                      required
+                    />
+                  </label>
+
+                  <div class="viability-form-grid">
+                    <label>
+                      <span>Investimento inicial</span>
+                      <span class="input-with-prefix">
+                        <i aria-hidden="true">R$</i>
+                        <input id="initialInvestment" type="number" min="0.01" step="0.01" placeholder="0,00" required />
+                      </span>
+                    </label>
+
+                    <label>
+                      <span>TMA ao ano</span>
+                      <span class="input-with-suffix">
+                        <input id="minimumAttractiveRate" type="number" min="0" step="0.01" placeholder="0,00" required />
+                        <i aria-hidden="true">%</i>
+                      </span>
+                    </label>
+
+                    <label>
+                      <span>Prazo do projeto</span>
+                      <span class="input-with-suffix">
+                        <input id="projectTermMonths" type="number" min="1" max="600" step="1" placeholder="12" required />
+                        <i aria-hidden="true">meses</i>
+                      </span>
+                    </label>
+
+                    <label>
+                      <span>Entrada líquida mensal</span>
+                      <span class="input-with-prefix">
+                        <i aria-hidden="true">R$</i>
+                        <input id="monthlyNetInflow" type="number" min="0.01" step="0.01" placeholder="0,00" required />
+                      </span>
+                    </label>
+
+                    <label>
+                      <span>Valor residual no fim do projeto</span>
+                      <span class="input-with-prefix">
+                        <i aria-hidden="true">R$</i>
+                        <input id="residualValue" type="number" min="0" step="0.01" placeholder="0,00" required />
+                      </span>
+                    </label>
+                  </div>
+
+                  <p class="calculation-note">
+                    Os meses com lançamentos usam o resultado líquido de “Visualizar dados”. A entrada mensal é usada somente nos meses ainda sem dados, e o valor residual é somado ao fluxo do último mês, representando o último dia do projeto.
+                  </p>
+
+                  <p class="form-feedback" id="viabilityFeedback" role="status" aria-live="polite"></p>
+
+                  <div class="form-actions">
+                    <button type="submit">Salvar cenário</button>
+                    <button class="secondary-button" id="resetViabilityButton" type="button">Novo cenário</button>
+                  </div>
+                </form>
+              </article>
+
+              <article class="panel viability-results-panel" aria-labelledby="viabilityResultsTitle">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Resultado</p>
+                    <h3 id="viabilityResultsTitle">Indicadores calculados</h3>
+                  </div>
+                  <span class="status neutral" id="viabilityStatus">Aguardando dados</span>
+                </div>
+
+                <div class="viability-metric-grid" id="viabilityResults">
+                  <article class="viability-metric">
+                    <span>VPL</span>
+                    <strong id="npvValue">—</strong>
+                    <small>Valor presente líquido na TMA informada</small>
+                  </article>
+                  <article class="viability-metric">
+                    <span>TIR anual</span>
+                    <strong id="irrValue">—</strong>
+                    <small>TIR mensal equivalente anualizada</small>
+                  </article>
+                  <article class="viability-metric">
+                    <span>Payback simples</span>
+                    <strong id="paybackValue">—</strong>
+                    <small>Tempo para recuperar o investimento</small>
+                  </article>
+                </div>
+
+                <dl class="viability-summary">
+                  <div>
+                    <dt>TMA mensal equivalente</dt>
+                    <dd id="monthlyRateValue">—</dd>
+                  </div>
+                  <div>
+                    <dt>Retorno líquido sem desconto</dt>
+                    <dd id="totalNetReturnValue">—</dd>
+                  </div>
+                </dl>
+
+                <p class="viability-explanation" id="viabilityExplanation">
+                  Preencha as cinco premissas para calcular a viabilidade deste cenário.
+                </p>
+              </article>
+            </section>
+
+            <section class="panel viability-chart-panel" aria-labelledby="viabilityChartTitle">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Fluxo de caixa</p>
+                  <h3 id="viabilityChartTitle">Entradas e saídas por mês do projeto</h3>
+                </div>
+                <div class="chart-legend" aria-label="Legenda do fluxo de caixa">
+                  <span><i class="legend-swatch investment"></i>Investimento</span>
+                  <span><i class="legend-swatch actual"></i>Realizado</span>
+                  <span><i class="legend-swatch projected"></i>Projetado</span>
+                  <span><i class="legend-swatch residual"></i>Residual</span>
+                </div>
+              </div>
+              <div class="viability-chart-wrap">
+                <canvas
+                  id="viabilityCashFlowChart"
+                  height="320"
+                  aria-label="Fluxo de caixa do projeto aguardando preenchimento"
+                ></canvas>
+              </div>
+              <p class="table-help" id="viabilityChartHelp">
+                Preencha as premissas para visualizar o fluxo de caixa.
+              </p>
+            </section>
+
+            <section class="panel saved-scenarios-panel" aria-labelledby="savedScenariosTitle">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Histórico</p>
+                  <h3 id="savedScenariosTitle">Cenários salvos</h3>
+                </div>
+                <span class="pill" id="viabilityScenarioCount">0 cenários</span>
+              </div>
+              <div class="saved-scenario-grid" id="savedScenarioGrid"></div>
             </section>
           </section>
         </div>

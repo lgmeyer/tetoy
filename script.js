@@ -26,6 +26,7 @@ const spreadsheetRows = [
 ];
 
 const fallbackStorageKey = "tetoy-local-entries";
+const viabilityStorageKey = "tetoy-viability-scenarios";
 const supabaseConfig = {
   url: "https://wlrsieftnfqhwblklaat.supabase.co",
   publishableKey: "sb_publishable_YdKXt7020dV8YNjS3K6wiA_UCVAShra",
@@ -41,6 +42,7 @@ const state = {
   editingEntryId: null,
   asaasImportData: null,
   asaasImportFileName: "",
+  viabilityScenarios: [],
 };
 
 const currency = new Intl.NumberFormat("pt-BR", {
@@ -54,7 +56,12 @@ const shortDate = new Intl.DateTimeFormat("pt-BR", {
   year: "numeric",
 });
 
-const { positiveAmount, signedEntryAmount, summarizeEntries } = globalThis.DashboardCalculations;
+const {
+  positiveAmount,
+  signedEntryAmount,
+  summarizeEntries,
+  calculateViability,
+} = globalThis.DashboardCalculations;
 
 function loadFallbackEntries() {
   try {
@@ -67,6 +74,27 @@ function loadFallbackEntries() {
 
 function saveFallbackEntries() {
   localStorage.setItem(fallbackStorageKey, JSON.stringify(state.entries));
+}
+
+function loadViabilityScenarios() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(viabilityStorageKey) || "[]");
+    if (!Array.isArray(saved)) return [];
+
+    return saved.map((scenario) => ({
+      ...scenario,
+      residualValue: Number(scenario.residualValue || 0),
+      actualMonthlyFlows: Array.isArray(scenario.actualMonthlyFlows)
+        ? scenario.actualMonthlyFlows
+        : actualMonthlyFlowsFor(Number(scenario.months)),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function saveViabilityScenarios() {
+  localStorage.setItem(viabilityStorageKey, JSON.stringify(state.viabilityScenarios));
 }
 
 async function setupSupabase() {
@@ -175,6 +203,28 @@ function monthTotal(monthKey) {
   return spreadsheetRows.reduce((total, row) => total + valueFor(row.category, monthKey), 0);
 }
 
+function monthHasData(monthKey) {
+  const hasBaseValue = spreadsheetRows.some(
+    (row) => positiveAmount(baseValueFor(row.category, monthKey)) > 0,
+  );
+  return hasBaseValue || state.entries.some((entry) => getMonthFromDate(entry.date) === monthKey);
+}
+
+function actualMonthlyFlowsFor(term) {
+  return Array.from({ length: term }, (_, index) => {
+    const month = months[index];
+    return month && monthHasData(month.key) ? monthTotal(month.key) : null;
+  });
+}
+
+function projectPeriodLabel(index) {
+  const date = new Date(2026, index, 1);
+  const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "short" })
+    .format(date)
+    .replace(".", "");
+  return `${monthLabel}/${String(date.getFullYear()).slice(-2)}`;
+}
+
 function monthBreakdown(monthKey) {
   const entries = state.entries.filter((entry) => getMonthFromDate(entry.date) === monthKey);
   const summary = summarizeEntries(entries);
@@ -246,6 +296,8 @@ function render() {
   if (state.activeView === "viewData") renderCharts();
   renderEntryHistory();
   if (state.asaasImportData) renderAsaasPreview();
+  renderViability();
+  renderSavedScenarios();
 }
 
 function renderAuth() {
@@ -934,6 +986,352 @@ function countLabel(value, singular, plural) {
   return `${value} ${value === 1 ? singular : plural}`;
 }
 
+function readViabilityAssumptions() {
+  const investmentField = document.querySelector("#initialInvestment");
+  const rateField = document.querySelector("#minimumAttractiveRate");
+  const termField = document.querySelector("#projectTermMonths");
+  const inflowField = document.querySelector("#monthlyNetInflow");
+  const residualField = document.querySelector("#residualValue");
+
+  if (
+    [investmentField, rateField, termField, inflowField, residualField]
+      .some((field) => field.value === "")
+  ) {
+    return null;
+  }
+
+  const term = Number(termField.value);
+  const assumptions = {
+    initialInvestment: Number(investmentField.value),
+    annualRate: Number(rateField.value) / 100,
+    months: term,
+    monthlyNetInflow: Number(inflowField.value),
+    residualValue: Number(residualField.value),
+    actualMonthlyFlows: actualMonthlyFlowsFor(term),
+  };
+
+  return calculateViability(assumptions) ? assumptions : null;
+}
+
+function renderViability() {
+  const assumptions = readViabilityAssumptions();
+  const result = assumptions ? calculateViability(assumptions) : null;
+  const panel = document.querySelector(".viability-results-panel");
+  const status = document.querySelector("#viabilityStatus");
+  const npv = document.querySelector("#npvValue");
+
+  if (!result) {
+    ["#npvValue", "#irrValue", "#paybackValue", "#monthlyRateValue", "#totalNetReturnValue"]
+      .forEach((selector) => {
+        document.querySelector(selector).textContent = "—";
+      });
+    status.textContent = "Aguardando dados";
+    status.className = "status neutral";
+    delete panel.dataset.viable;
+    npv.classList.remove("negative-amount");
+    document.querySelector("#viabilityExplanation").textContent =
+      "Preencha as cinco premissas para calcular a viabilidade deste cenário.";
+    renderViabilityCashFlowChart(null, null);
+    return;
+  }
+
+  const isViable = result.npv >= 0;
+  panel.dataset.viable = String(isViable);
+  status.textContent = isViable ? "Viável pela TMA" : "Abaixo da TMA";
+  status.className = `status ${isViable ? "ok" : "missing"}`;
+  npv.textContent = currency.format(result.npv);
+  npv.classList.toggle("negative-amount", result.npv < 0);
+  document.querySelector("#irrValue").textContent = result.annualIrr === null
+    ? "Não calculável"
+    : formatPercent(result.annualIrr);
+  document.querySelector("#paybackValue").textContent = result.paybackMonths === null
+    ? "Não recuperado"
+    : formatMonths(result.paybackMonths);
+  document.querySelector("#monthlyRateValue").textContent = formatPercent(result.monthlyRate);
+  document.querySelector("#totalNetReturnValue").textContent = currency.format(result.totalNetReturn);
+  document.querySelector("#viabilityExplanation").textContent = isViable
+    ? `O VPL é positivo: este cenário supera a TMA de ${formatPercent(assumptions.annualRate)} ao ano. O cálculo usa ${countLabel(result.actualPeriodCount, "mês realizado", "meses realizados")} e ${countLabel(result.projectedPeriodCount, "mês projetado", "meses projetados")}.`
+    : `O VPL é negativo: este cenário não alcança a TMA de ${formatPercent(assumptions.annualRate)} ao ano. O cálculo usa ${countLabel(result.actualPeriodCount, "mês realizado", "meses realizados")} e ${countLabel(result.projectedPeriodCount, "mês projetado", "meses projetados")}.`;
+  renderViabilityCashFlowChart(assumptions, result);
+}
+
+function renderViabilityCashFlowChart(assumptions, result) {
+  const canvas = document.querySelector("#viabilityCashFlowChart");
+  const help = document.querySelector("#viabilityChartHelp");
+
+  if (!assumptions || !result) {
+    canvas.setAttribute("aria-label", "Fluxo de caixa do projeto aguardando preenchimento");
+    help.textContent = "Preencha as premissas para visualizar o fluxo de caixa.";
+    clearCanvas(canvas);
+    return;
+  }
+
+  const basePeriodFlows = result.periodFlows.map((value, index) =>
+    index === result.periodFlows.length - 1 ? value - assumptions.residualValue : value,
+  );
+  const items = [
+    { label: "Início", value: -assumptions.initialInvestment, type: "investment" },
+    ...basePeriodFlows.map((value, index) => ({
+      label: projectPeriodLabel(index),
+      value,
+      type: assumptions.actualMonthlyFlows[index] === null
+        || assumptions.actualMonthlyFlows[index] === undefined
+        ? "projected"
+        : "actual",
+    })),
+  ];
+
+  const accessibleItems = items.slice(0, 60).map(
+    (item) => `${item.label}: ${currency.format(item.value)} (${cashFlowTypeLabel(item.type)})`,
+  );
+  const truncatedLabel = items.length > 60 ? `; e mais ${items.length - 60} períodos` : "";
+  canvas.setAttribute(
+    "aria-label",
+    `Fluxo de caixa do projeto. ${accessibleItems.join("; ")}${truncatedLabel}. Valor residual de ${currency.format(assumptions.residualValue)} no último mês.`,
+  );
+  help.textContent = `${countLabel(result.actualPeriodCount, "mês usa", "meses usam")} dados de “Visualizar dados”; ${countLabel(result.projectedPeriodCount, "mês usa", "meses usam")} a entrada líquida projetada. O residual de ${currency.format(assumptions.residualValue)} entra em ${projectPeriodLabel(assumptions.months - 1)}.`;
+
+  if (state.activeView !== "viabilitySimulation") return;
+  drawViabilityCashFlowChart(canvas, items, assumptions.residualValue);
+}
+
+function drawViabilityCashFlowChart(canvas, items, residualValue) {
+  const context = canvas.getContext("2d");
+  const wrapper = canvas.closest(".viability-chart-wrap");
+  const pixelRatio = window.devicePixelRatio || 1;
+  const safeCanvasWidth = Math.floor(16000 / pixelRatio);
+  const cssWidth = Math.max(
+    wrapper.clientWidth - 2,
+    Math.min(safeCanvasWidth, items.length * 52 + 80),
+  );
+  const chartHeight = 320;
+
+  canvas.style.width = `${cssWidth}px`;
+  canvas.width = Math.max(1, Math.round(cssWidth * pixelRatio));
+  canvas.height = chartHeight * pixelRatio;
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, cssWidth, chartHeight);
+
+  const padding = { top: 30, right: 24, bottom: 48, left: 72 };
+  const width = cssWidth - padding.left - padding.right;
+  const height = chartHeight - padding.top - padding.bottom;
+  const lastBaseValue = items.at(-1).value;
+  const values = [...items.map((item) => item.value), lastBaseValue + residualValue, 0];
+  let minValue = Math.min(...values);
+  let maxValue = Math.max(...values);
+  const rangePadding = Math.max(1, (maxValue - minValue) * 0.12);
+  minValue -= rangePadding;
+  maxValue += rangePadding;
+
+  const yForValue = (value) => padding.top + ((maxValue - value) / (maxValue - minValue)) * height;
+  const zeroY = yForValue(0);
+  const groupWidth = width / items.length;
+  const barWidth = Math.max(6, Math.min(26, groupWidth * 0.58));
+
+  [minValue, 0, maxValue].forEach((value) => {
+    const y = yForValue(value);
+    context.beginPath();
+    context.moveTo(padding.left, y);
+    context.lineTo(padding.left + width, y);
+    context.strokeStyle = value === 0 ? "#8996a5" : "#d9e0e8";
+    context.lineWidth = value === 0 ? 1.5 : 1;
+    context.stroke();
+    context.fillStyle = "#657384";
+    context.font = "700 10px Inter, system-ui, sans-serif";
+    context.textAlign = "right";
+    context.fillText(compactCurrency(value), padding.left - 10, y + 4);
+  });
+
+  const colors = {
+    investment: "#8b2525",
+    actual: "#11875d",
+    projected: "#2c6fbb",
+  };
+  const labelStep = Math.max(1, Math.ceil(items.length / 16));
+
+  items.forEach((item, index) => {
+    const x = padding.left + groupWidth * index + groupWidth / 2;
+    const valueY = yForValue(item.value);
+    const barTop = Math.min(zeroY, valueY);
+    const barHeight = Math.max(2, Math.abs(zeroY - valueY));
+
+    context.fillStyle = colors[item.type];
+    roundRect(context, x - barWidth / 2, barTop, barWidth, barHeight, 4);
+    context.fill();
+
+    if (index % labelStep === 0 || index === items.length - 1) {
+      context.fillStyle = "#657384";
+      context.font = "700 10px Inter, system-ui, sans-serif";
+      context.textAlign = "center";
+      context.fillText(item.label, x, chartHeight - 17);
+    }
+
+    if (items.length <= 24 || index === 0 || index === items.length - 1) {
+      const labelY = item.value >= 0 ? Math.max(13, valueY - 7) : Math.min(chartHeight - 42, valueY + 14);
+      context.fillStyle = item.value < 0 ? "#8b2525" : "#17202a";
+      context.font = "800 9px Inter, system-ui, sans-serif";
+      context.textAlign = "center";
+      context.fillText(compactChartCurrency(item.value), x, labelY);
+    }
+  });
+
+  if (residualValue > 0) {
+    const lastIndex = items.length - 1;
+    const x = padding.left + groupWidth * lastIndex + groupWidth / 2;
+    const baseY = yForValue(lastBaseValue);
+    const totalY = yForValue(lastBaseValue + residualValue);
+    context.beginPath();
+    context.moveTo(x, baseY);
+    context.lineTo(x, totalY);
+    context.strokeStyle = "#ad741f";
+    context.lineWidth = 3;
+    context.stroke();
+    context.beginPath();
+    context.arc(x, totalY, 5, 0, Math.PI * 2);
+    context.fillStyle = "#ad741f";
+    context.fill();
+    context.fillStyle = "#ad741f";
+    context.font = "800 9px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(`+${compactChartCurrency(residualValue)}`, x, Math.max(12, totalY - 9));
+  }
+}
+
+function clearCanvas(canvas) {
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.style.width = "100%";
+}
+
+function cashFlowTypeLabel(type) {
+  return {
+    investment: "investimento inicial",
+    actual: "realizado",
+    projected: "projetado",
+  }[type];
+}
+
+function renderSavedScenarios() {
+  const grid = document.querySelector("#savedScenarioGrid");
+  const count = state.viabilityScenarios.length;
+  document.querySelector("#viabilityScenarioCount").textContent =
+    count === 1 ? "1 cenário" : `${count} cenários`;
+
+  if (!count) {
+    grid.innerHTML = `
+      <p class="saved-scenario-empty">
+        Nenhum cenário salvo ainda. Preencha as premissas e salve sua primeira simulação.
+      </p>
+    `;
+    return;
+  }
+
+  grid.innerHTML = state.viabilityScenarios
+    .map((scenario) => {
+      const result = calculateViability(scenario);
+      const date = new Date(scenario.createdAt);
+      const savedAt = Number.isNaN(date.getTime())
+        ? "Data não informada"
+        : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+
+      return `
+        <article class="saved-scenario-card">
+          <header>
+            <h4>${escapeHtml(scenario.name)}</h4>
+            <time datetime="${escapeAttribute(scenario.createdAt)}">${escapeHtml(savedAt)}</time>
+          </header>
+          <div class="saved-scenario-inputs">
+            <div><span>Investimento</span><strong>${currency.format(scenario.initialInvestment)}</strong></div>
+            <div><span>TMA anual</span><strong>${formatPercent(scenario.annualRate)}</strong></div>
+            <div><span>Prazo</span><strong>${scenario.months} meses</strong></div>
+            <div><span>Entrada mensal</span><strong>${currency.format(scenario.monthlyNetInflow)}</strong></div>
+            <div><span>Valor residual</span><strong>${currency.format(scenario.residualValue || 0)}</strong></div>
+            <div><span>Dados realizados</span><strong>${result ? countLabel(result.actualPeriodCount, "mês", "meses") : "—"}</strong></div>
+          </div>
+          <div class="saved-scenario-results">
+            <div><span>VPL</span><strong>${result ? currency.format(result.npv) : "—"}</strong></div>
+            <div><span>TIR anual</span><strong>${result?.annualIrr === null || !result ? "—" : formatPercent(result.annualIrr)}</strong></div>
+            <div><span>Payback</span><strong>${result?.paybackMonths === null || !result ? "Não recuperado" : formatMonths(result.paybackMonths)}</strong></div>
+          </div>
+          <div class="saved-scenario-actions">
+            <button class="load-scenario-button" type="button" data-scenario-id="${escapeAttribute(scenario.id)}">Carregar</button>
+            <button class="delete-scenario-button" type="button" data-scenario-id="${escapeAttribute(scenario.id)}">Excluir</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function handleViabilitySubmit(event) {
+  event.preventDefault();
+
+  const assumptions = readViabilityAssumptions();
+  const name = document.querySelector("#viabilityScenarioName").value.trim();
+  const feedback = document.querySelector("#viabilityFeedback");
+
+  if (!name || !assumptions) {
+    feedback.textContent = "Preencha todos os campos com valores válidos antes de salvar.";
+    return;
+  }
+
+  state.viabilityScenarios.unshift({
+    id: globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now()),
+    name,
+    ...assumptions,
+    createdAt: new Date().toISOString(),
+  });
+  saveViabilityScenarios();
+  renderSavedScenarios();
+  feedback.textContent = "Cenário salvo neste navegador.";
+}
+
+function resetViabilityForm() {
+  document.querySelector("#viabilityForm").reset();
+  document.querySelector("#viabilityFeedback").textContent = "";
+  renderViability();
+  document.querySelector("#viabilityScenarioName").focus();
+}
+
+function loadViabilityScenario(scenarioId) {
+  const scenario = state.viabilityScenarios.find((item) => String(item.id) === scenarioId);
+  if (!scenario) return;
+
+  document.querySelector("#viabilityScenarioName").value = scenario.name;
+  document.querySelector("#initialInvestment").value = scenario.initialInvestment;
+  document.querySelector("#minimumAttractiveRate").value = scenario.annualRate * 100;
+  document.querySelector("#projectTermMonths").value = scenario.months;
+  document.querySelector("#monthlyNetInflow").value = scenario.monthlyNetInflow;
+  document.querySelector("#residualValue").value = scenario.residualValue || 0;
+  document.querySelector("#viabilityFeedback").textContent =
+    "Cenário carregado. Ao salvar, uma nova simulação será criada.";
+  renderViability();
+  document.querySelector("#viabilitySimulation").scrollIntoView({ behavior: "smooth" });
+}
+
+function deleteViabilityScenario(scenarioId) {
+  const scenario = state.viabilityScenarios.find((item) => String(item.id) === scenarioId);
+  if (!scenario || !window.confirm(`Excluir o cenário “${scenario.name}”?`)) return;
+
+  state.viabilityScenarios = state.viabilityScenarios.filter(
+    (item) => String(item.id) !== scenarioId,
+  );
+  saveViabilityScenarios();
+  renderSavedScenarios();
+}
+
+function formatPercent(decimalRate) {
+  return `${(decimalRate * 100).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`;
+}
+
+function formatMonths(value) {
+  const rounded = Number(value.toFixed(1));
+  return `${rounded.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ${rounded === 1 ? "mês" : "meses"}`;
+}
+
 async function clearEntries() {
   if (!state.entries.length) return;
 
@@ -1039,6 +1437,18 @@ document.querySelector("#entryForm").addEventListener("submit", handleEntrySubmi
 document.querySelector("#clearEntriesButton").addEventListener("click", clearEntries);
 document.querySelector("#asaasCsvFile").addEventListener("change", handleAsaasFileChange);
 document.querySelector("#saveAsaasRevenueButton").addEventListener("click", saveAsaasRevenue);
+document.querySelector("#viabilityForm").addEventListener("submit", handleViabilitySubmit);
+document.querySelector("#viabilityForm").addEventListener("input", () => {
+  document.querySelector("#viabilityFeedback").textContent = "";
+  renderViability();
+});
+document.querySelector("#resetViabilityButton").addEventListener("click", resetViabilityForm);
+document.querySelector("#savedScenarioGrid").addEventListener("click", (event) => {
+  const loadButton = event.target.closest(".load-scenario-button");
+  const deleteButton = event.target.closest(".delete-scenario-button");
+  if (loadButton) loadViabilityScenario(loadButton.dataset.scenarioId);
+  if (deleteButton) deleteViabilityScenario(deleteButton.dataset.scenarioId);
+});
 document.querySelector("#entryRows").addEventListener("click", (event) => {
   const button = event.target.closest(".edit-entry-button");
   if (button) openEntryEditor([button.dataset.entryId]);
@@ -1062,11 +1472,14 @@ document.querySelector("#cancelEditEntryButton").addEventListener("click", close
 document.querySelector("#editEntryDialog").addEventListener("close", resetEntryEditor);
 window.addEventListener("resize", () => {
   if (state.activeView === "viewData") renderCharts();
+  if (state.activeView === "viabilitySimulation") renderViability();
 });
 
 async function initializeApp() {
   await setupSupabase();
   await loadEntries();
+  state.viabilityScenarios = loadViabilityScenarios();
+  saveViabilityScenarios();
   populateControls();
   showHome();
 }
