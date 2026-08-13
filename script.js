@@ -39,6 +39,8 @@ const state = {
   selectedMonth: "ago",
   entries: [],
   storageMode: "browser",
+  scenarioStorageMode: "browser",
+  scenarioStorageError: "",
   editingEntryId: null,
   asaasImportData: null,
   asaasImportFileName: "",
@@ -97,6 +99,36 @@ function saveViabilityScenarios() {
   localStorage.setItem(viabilityStorageKey, JSON.stringify(state.viabilityScenarios));
 }
 
+function normalizeSupabaseScenario(scenario) {
+  return {
+    id: scenario.id,
+    name: scenario.name,
+    initialInvestment: Number(scenario.initial_investment),
+    annualRate: Number(scenario.annual_rate),
+    months: Number(scenario.months),
+    monthlyNetInflow: Number(scenario.monthly_net_inflow),
+    residualValue: Number(scenario.residual_value || 0),
+    actualMonthlyFlows: Array.isArray(scenario.actual_monthly_flows)
+      ? scenario.actual_monthly_flows
+      : [],
+    createdAt: scenario.created_at,
+  };
+}
+
+function serializeSupabaseScenario(scenario) {
+  return {
+    id: scenario.id,
+    name: scenario.name,
+    initial_investment: scenario.initialInvestment,
+    annual_rate: scenario.annualRate,
+    months: scenario.months,
+    monthly_net_inflow: scenario.monthlyNetInflow,
+    residual_value: scenario.residualValue || 0,
+    actual_monthly_flows: scenario.actualMonthlyFlows || [],
+    created_at: scenario.createdAt,
+  };
+}
+
 async function setupSupabase() {
   if (!window.supabase?.createClient) {
     state.storageMode = "browser";
@@ -146,6 +178,73 @@ async function loadEntries() {
     state.storageMode = "browser";
     state.entries = loadFallbackEntries();
   }
+}
+
+async function loadStoredViabilityScenarios() {
+  const browserScenarios = loadViabilityScenarios();
+
+  if (state.storageMode === "supabase") {
+    const { data, error } = await supabaseClient
+      .from("viability_scenarios")
+      .select("id, name, initial_investment, annual_rate, months, monthly_net_inflow, residual_value, actual_monthly_flows, created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.warn("Erro ao carregar cenários do Supabase:", error);
+      state.scenarioStorageMode = "unavailable";
+      state.scenarioStorageError =
+        "A tabela de cenários ainda não está disponível no Supabase. Aplique a migração antes de salvar em produção.";
+      state.viabilityScenarios = browserScenarios;
+      return;
+    }
+
+    state.scenarioStorageMode = "supabase";
+    state.scenarioStorageError = "";
+    const remoteScenarios = data.map(normalizeSupabaseScenario);
+    const remoteIds = new Set(remoteScenarios.map((scenario) => String(scenario.id)));
+    const localOnlyScenarios = browserScenarios.filter(
+      (scenario) => !remoteIds.has(String(scenario.id)),
+    );
+
+    if (localOnlyScenarios.length) {
+      const { data: migratedData, error: migrationError } = await supabaseClient
+        .from("viability_scenarios")
+        .upsert(localOnlyScenarios.map(serializeSupabaseScenario), { onConflict: "id" })
+        .select("id, name, initial_investment, annual_rate, months, monthly_net_inflow, residual_value, actual_monthly_flows, created_at");
+
+      if (migrationError) {
+        console.warn("Erro ao migrar cenários locais para o Supabase:", migrationError);
+        state.scenarioStorageError =
+          "Os cenários da base foram carregados, mas alguns cenários deste navegador não puderam ser migrados.";
+      } else {
+        remoteScenarios.push(...migratedData.map(normalizeSupabaseScenario));
+        localStorage.removeItem(viabilityStorageKey);
+      }
+    }
+
+    state.viabilityScenarios = remoteScenarios.sort(
+      (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
+    );
+    return;
+  }
+
+  if (state.storageMode === "api") {
+    try {
+      const response = await fetch("/api/viability-scenarios");
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || `API retornou ${response.status}`);
+      state.scenarioStorageMode = "api";
+      state.scenarioStorageError = "";
+      state.viabilityScenarios = Array.isArray(payload.scenarios) ? payload.scenarios : [];
+      return;
+    } catch (error) {
+      console.warn("Erro ao carregar cenários da API:", error);
+      state.scenarioStorageError = "Não foi possível acessar o armazenamento de cenários.";
+    }
+  }
+
+  state.scenarioStorageMode = "browser";
+  state.viabilityScenarios = browserScenarios;
 }
 
 function normalizeSupabaseEntry(entry) {
@@ -291,6 +390,7 @@ function populateControls() {
 
 function render() {
   renderAuth();
+  renderScenarioStorage();
   renderMetrics();
   renderSpreadsheet();
   if (state.activeView === "viewData") renderCharts();
@@ -298,6 +398,18 @@ function render() {
   if (state.asaasImportData) renderAsaasPreview();
   renderViability();
   renderSavedScenarios();
+}
+
+function renderScenarioStorage() {
+  const badge = document.querySelector("#scenarioStorageBadge");
+  const labels = {
+    supabase: "Cenários salvos no Supabase",
+    api: "Cenários salvos no servidor",
+    browser: "Cenários salvos neste navegador",
+    unavailable: "Configuração do Supabase pendente",
+  };
+  badge.textContent = labels[state.scenarioStorageMode] || "Armazenamento indisponível";
+  badge.dataset.tone = state.scenarioStorageMode === "unavailable" ? "warning" : "success";
 }
 
 function renderAuth() {
@@ -1217,8 +1329,13 @@ function renderSavedScenarios() {
   document.querySelector("#viabilityScenarioCount").textContent =
     count === 1 ? "1 cenário" : `${count} cenários`;
 
+  const storageNotice = state.scenarioStorageError
+    ? `<p class="scenario-storage-warning" role="alert">${escapeHtml(state.scenarioStorageError)}</p>`
+    : "";
+
   if (!count) {
     grid.innerHTML = `
+      ${storageNotice}
       <p class="saved-scenario-empty">
         Nenhum cenário salvo ainda. Preencha as premissas e salve sua primeira simulação.
       </p>
@@ -1226,7 +1343,7 @@ function renderSavedScenarios() {
     return;
   }
 
-  grid.innerHTML = state.viabilityScenarios
+  grid.innerHTML = storageNotice + state.viabilityScenarios
     .map((scenario) => {
       const result = calculateViability(scenario);
       const date = new Date(scenario.createdAt);
@@ -1263,7 +1380,37 @@ function renderSavedScenarios() {
     .join("");
 }
 
-function handleViabilitySubmit(event) {
+async function createViabilityScenario(scenario) {
+  if (state.scenarioStorageMode === "supabase") {
+    const { data, error } = await supabaseClient
+      .from("viability_scenarios")
+      .insert(serializeSupabaseScenario(scenario))
+      .select("id, name, initial_investment, annual_rate, months, monthly_net_inflow, residual_value, actual_monthly_flows, created_at")
+      .single();
+
+    if (error) throw new Error(error.message || "Não foi possível salvar no Supabase.");
+    return normalizeSupabaseScenario(data);
+  }
+
+  if (state.scenarioStorageMode === "api") {
+    const response = await fetch("/api/viability-scenarios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(scenario),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || "Não foi possível salvar o cenário.");
+    return payload.scenario;
+  }
+
+  if (state.scenarioStorageMode === "unavailable") {
+    throw new Error(state.scenarioStorageError || "O armazenamento de cenários está indisponível.");
+  }
+
+  return scenario;
+}
+
+async function handleViabilitySubmit(event) {
   event.preventDefault();
 
   const assumptions = readViabilityAssumptions();
@@ -1275,15 +1422,35 @@ function handleViabilitySubmit(event) {
     return;
   }
 
-  state.viabilityScenarios.unshift({
+  const submitButton = event.submitter || document.querySelector("#viabilityForm button[type='submit']");
+  const scenario = {
     id: globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now()),
     name,
     ...assumptions,
     createdAt: new Date().toISOString(),
-  });
-  saveViabilityScenarios();
-  renderSavedScenarios();
-  feedback.textContent = "Cenário salvo neste navegador.";
+  };
+
+  submitButton.disabled = true;
+  feedback.textContent = state.scenarioStorageMode === "supabase"
+    ? "Salvando cenário na base de dados…"
+    : "Salvando cenário…";
+
+  try {
+    const savedScenario = await createViabilityScenario(scenario);
+    state.viabilityScenarios.unshift(savedScenario);
+    if (state.scenarioStorageMode === "browser") saveViabilityScenarios();
+    renderSavedScenarios();
+    feedback.textContent = state.scenarioStorageMode === "supabase"
+      ? "Cenário salvo na base de dados."
+      : state.scenarioStorageMode === "api"
+        ? "Cenário salvo no servidor."
+        : "Cenário salvo neste navegador.";
+  } catch (error) {
+    console.warn("Erro ao salvar cenário:", error);
+    feedback.textContent = error.message || "Não foi possível salvar o cenário.";
+  } finally {
+    submitButton.disabled = false;
+  }
 }
 
 function resetViabilityForm() {
@@ -1309,15 +1476,37 @@ function loadViabilityScenario(scenarioId) {
   document.querySelector("#viabilitySimulation").scrollIntoView({ behavior: "smooth" });
 }
 
-function deleteViabilityScenario(scenarioId) {
+async function deleteViabilityScenario(scenarioId) {
   const scenario = state.viabilityScenarios.find((item) => String(item.id) === scenarioId);
   if (!scenario || !window.confirm(`Excluir o cenário “${scenario.name}”?`)) return;
 
-  state.viabilityScenarios = state.viabilityScenarios.filter(
-    (item) => String(item.id) !== scenarioId,
-  );
-  saveViabilityScenarios();
-  renderSavedScenarios();
+  try {
+    if (state.scenarioStorageMode === "supabase") {
+      const { error } = await supabaseClient
+        .from("viability_scenarios")
+        .delete()
+        .eq("id", scenario.id);
+      if (error) throw new Error(error.message || "Não foi possível excluir no Supabase.");
+    } else if (state.scenarioStorageMode === "api") {
+      const response = await fetch(`/api/viability-scenarios/${encodeURIComponent(scenario.id)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || "Não foi possível excluir o cenário.");
+    } else if (state.scenarioStorageMode === "unavailable") {
+      throw new Error(state.scenarioStorageError || "O armazenamento de cenários está indisponível.");
+    }
+
+    state.viabilityScenarios = state.viabilityScenarios.filter(
+      (item) => String(item.id) !== scenarioId,
+    );
+    if (state.scenarioStorageMode === "browser") saveViabilityScenarios();
+    renderSavedScenarios();
+  } catch (error) {
+    console.warn("Erro ao excluir cenário:", error);
+    document.querySelector("#viabilityFeedback").textContent =
+      error.message || "Não foi possível excluir o cenário.";
+  }
 }
 
 function formatPercent(decimalRate) {
@@ -1478,8 +1667,7 @@ window.addEventListener("resize", () => {
 async function initializeApp() {
   await setupSupabase();
   await loadEntries();
-  state.viabilityScenarios = loadViabilityScenarios();
-  saveViabilityScenarios();
+  await loadStoredViabilityScenarios();
   populateControls();
   showHome();
 }

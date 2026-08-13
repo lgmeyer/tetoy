@@ -788,6 +788,11 @@ input {
   white-space: nowrap;
 }
 
+.privacy-note[data-tone="warning"] {
+  color: var(--amber);
+  background: #fff3d9;
+}
+
 .upload-field {
   margin-top: 20px;
   padding: 18px;
@@ -1184,6 +1189,17 @@ input {
   border-radius: 8px;
   color: var(--muted);
   text-align: center;
+}
+
+.scenario-storage-warning {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--amber);
+  color: #765015;
+  background: #fff3d9;
+  font-size: 0.86rem;
+  line-height: 1.5;
 }
 
 @media (max-width: 1180px) {

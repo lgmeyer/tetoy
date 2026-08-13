@@ -51,6 +51,22 @@ createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/viability-scenarios" && request.method === "GET") {
+      handleListViabilityScenarios(response);
+      return;
+    }
+
+    if (url.pathname === "/api/viability-scenarios" && request.method === "POST") {
+      await handleCreateViabilityScenario(request, response);
+      return;
+    }
+
+    const scenarioMatch = url.pathname.match(/^\/api\/viability-scenarios\/([^/]+)$/);
+    if (scenarioMatch && request.method === "DELETE") {
+      handleDeleteViabilityScenario(response, decodeURIComponent(scenarioMatch[1]));
+      return;
+    }
+
     if (url.pathname === "/api/webhooks/asaas" && request.method === "POST") {
       await handleAsaasWebhook(request, response);
       return;
@@ -84,6 +100,18 @@ async function openDatabase() {
       date TEXT NOT NULL,
       note TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS viability_scenarios (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      initial_investment REAL NOT NULL,
+      annual_rate REAL NOT NULL,
+      months INTEGER NOT NULL,
+      monthly_net_inflow REAL NOT NULL,
+      residual_value REAL NOT NULL DEFAULT 0,
+      actual_monthly_flows TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
     );
   `);
 
@@ -203,6 +231,109 @@ async function handleUpdateEntry(request, response, entryId) {
 function handleDeleteEntries(response) {
   database.prepare("DELETE FROM entries").run();
   sendJson(response, 200, { entries: [] });
+}
+
+function handleListViabilityScenarios(response) {
+  const scenarios = database
+    .prepare(`
+      SELECT id, name, initial_investment AS initialInvestment,
+        annual_rate AS annualRate, months, monthly_net_inflow AS monthlyNetInflow,
+        residual_value AS residualValue, actual_monthly_flows AS actualMonthlyFlows,
+        created_at AS createdAt
+      FROM viability_scenarios
+      ORDER BY created_at DESC
+    `)
+    .all()
+    .map(normalizeDatabaseScenario);
+
+  sendJson(response, 200, { scenarios });
+}
+
+async function handleCreateViabilityScenario(request, response) {
+  const payload = await readJsonRequest(request);
+  const validationError = validateViabilityScenarioPayload(payload);
+
+  if (validationError) {
+    sendJson(response, 400, { error: "invalid_viability_scenario", message: validationError });
+    return;
+  }
+
+  try {
+    database.prepare(`
+      INSERT INTO viability_scenarios (
+        id, name, initial_investment, annual_rate, months, monthly_net_inflow,
+        residual_value, actual_monthly_flows, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      payload.id,
+      payload.name.trim(),
+      Number(payload.initialInvestment),
+      Number(payload.annualRate),
+      Number(payload.months),
+      Number(payload.monthlyNetInflow),
+      Number(payload.residualValue || 0),
+      JSON.stringify(payload.actualMonthlyFlows || []),
+      payload.createdAt,
+    );
+  } catch (error) {
+    if (String(error.message).includes("UNIQUE constraint failed")) {
+      sendJson(response, 409, { error: "scenario_exists", message: "Este cenário já foi salvo." });
+      return;
+    }
+    throw error;
+  }
+
+  const scenario = normalizeDatabaseScenario(database.prepare(`
+    SELECT id, name, initial_investment AS initialInvestment,
+      annual_rate AS annualRate, months, monthly_net_inflow AS monthlyNetInflow,
+      residual_value AS residualValue, actual_monthly_flows AS actualMonthlyFlows,
+      created_at AS createdAt
+    FROM viability_scenarios
+    WHERE id = ?
+  `).get(payload.id));
+
+  sendJson(response, 201, { scenario });
+}
+
+function handleDeleteViabilityScenario(response, scenarioId) {
+  if (!scenarioId || scenarioId.length > 100) {
+    sendJson(response, 400, { error: "invalid_scenario_id", message: "Cenário inválido." });
+    return;
+  }
+
+  const result = database.prepare("DELETE FROM viability_scenarios WHERE id = ?").run(scenarioId);
+  if (result.changes === 0) {
+    sendJson(response, 404, { error: "scenario_not_found", message: "Cenário não encontrado." });
+    return;
+  }
+
+  sendJson(response, 200, { deleted: true });
+}
+
+function normalizeDatabaseScenario(scenario) {
+  let actualMonthlyFlows = [];
+  try {
+    actualMonthlyFlows = JSON.parse(scenario.actualMonthlyFlows || "[]");
+  } catch {
+    actualMonthlyFlows = [];
+  }
+
+  return { ...scenario, actualMonthlyFlows };
+}
+
+function validateViabilityScenarioPayload(payload) {
+  if (!payload || typeof payload !== "object") return "Dados ausentes.";
+  if (!payload.id || typeof payload.id !== "string" || payload.id.length > 100) return "Identificador inválido.";
+  if (!payload.name || typeof payload.name !== "string" || payload.name.trim().length > 80) return "Informe um nome válido.";
+  if (!Number.isFinite(Number(payload.initialInvestment)) || Number(payload.initialInvestment) <= 0) return "Informe o investimento inicial.";
+  if (!Number.isFinite(Number(payload.annualRate)) || Number(payload.annualRate) < 0) return "Informe uma TMA válida.";
+  if (!Number.isSafeInteger(Number(payload.months)) || Number(payload.months) < 1 || Number(payload.months) > 600) return "Informe um prazo entre 1 e 600 meses.";
+  if (!Number.isFinite(Number(payload.monthlyNetInflow)) || Number(payload.monthlyNetInflow) <= 0) return "Informe a entrada líquida mensal.";
+  if (!Number.isFinite(Number(payload.residualValue || 0)) || Number(payload.residualValue || 0) < 0) return "Informe um valor residual válido.";
+  if (!Array.isArray(payload.actualMonthlyFlows) || payload.actualMonthlyFlows.length > 600) return "Fluxos mensais inválidos.";
+  if (payload.actualMonthlyFlows.some((value) => value !== null && !Number.isFinite(Number(value)))) return "Fluxos mensais inválidos.";
+  if (typeof payload.createdAt !== "string" || Number.isNaN(Date.parse(payload.createdAt))) return "Data de criação inválida.";
+  return null;
 }
 
 function validateEntryPayload(payload) {
