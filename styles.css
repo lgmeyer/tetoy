@@ -124,6 +124,14 @@ h3 {
   gap: 18px;
 }
 
+.app-loading-status {
+  margin: -10px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 750;
+  text-align: center;
+}
+
 .choice-card {
   display: grid;
   gap: 10px;

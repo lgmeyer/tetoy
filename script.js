@@ -30,6 +30,7 @@ let spreadsheetRows = defaultSpreadsheetRows.map((row) => ({ ...row }));
 const fallbackStorageKey = "tetoy-local-entries";
 const fallbackCategoryStorageKey = "tetoy-category-options";
 const viabilityStorageKey = "tetoy-viability-scenarios";
+const supabaseQueryTimeoutMs = 5000;
 const supabaseConfig = {
   url: "https://wlrsieftnfqhwblklaat.supabase.co",
   publishableKey: "sb_publishable_YdKXt7020dV8YNjS3K6wiA_UCVAShra",
@@ -38,6 +39,7 @@ const supabaseConfig = {
 let supabaseClient = null;
 
 const state = {
+  appReady: false,
   activeView: null,
   selectedMonth: "ago",
   entries: [],
@@ -80,6 +82,27 @@ function loadFallbackEntries() {
 
 function saveFallbackEntries() {
   localStorage.setItem(fallbackStorageKey, JSON.stringify(state.entries));
+}
+
+function entrySignature(entry) {
+  return [
+    normalizeCategoryName(entry.category).toLocaleLowerCase("pt-BR"),
+    Number(entry.value),
+    entry.direction,
+    entry.date,
+    String(entry.note || "").trim(),
+  ].join("|");
+}
+
+function mergeStoredEntries(primaryEntries, browserEntries) {
+  const primaryIds = new Set(primaryEntries.map((entry) => String(entry.id)));
+  const primarySignatures = new Set(primaryEntries.map(entrySignature));
+  const browserOnlyEntries = browserEntries.filter(
+    (entry) =>
+      !primaryIds.has(String(entry.id)) && !primarySignatures.has(entrySignature(entry)),
+  );
+
+  return { entries: [...primaryEntries, ...browserOnlyEntries], browserOnlyEntries };
 }
 
 function loadFallbackCategoryOptions() {
@@ -168,13 +191,25 @@ async function setupSupabase() {
 
 async function loadEntries() {
   if (state.storageMode === "supabase") {
-    const { data, error } = await supabaseClient
-      .from("entries")
-      .select("id, category, value, direction, date, note, created_at")
-      .order("date", { ascending: false })
-      .order("id", { ascending: false });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), supabaseQueryTimeoutMs);
+    let data;
+    let error;
 
-    if (error) {
+    try {
+      ({ data, error } = await supabaseClient
+        .from("entries")
+        .select("id, category, value, direction, date, note, created_at")
+        .order("date", { ascending: false })
+        .order("id", { ascending: false })
+        .abortSignal(controller.signal));
+    } catch (requestError) {
+      error = requestError;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (error || !Array.isArray(data)) {
       console.warn("Erro ao carregar Supabase:", error);
       await loadEntriesWithoutSupabase();
       return;
@@ -190,7 +225,10 @@ async function loadEntries() {
       return;
     }
 
-    state.entries = remoteEntries;
+    const merged = mergeStoredEntries(remoteEntries, browserEntries);
+    state.entries = merged.entries;
+    if (merged.browserOnlyEntries.length) state.storageMode = "browser";
+    saveFallbackEntries();
     return;
   }
 
@@ -219,8 +257,10 @@ async function loadEntriesWithoutSupabase() {
       return;
     }
 
-    state.storageMode = "api";
-    state.entries = apiEntries;
+    const merged = mergeStoredEntries(apiEntries, browserEntries);
+    state.storageMode = merged.browserOnlyEntries.length ? "browser" : "api";
+    state.entries = merged.entries;
+    saveFallbackEntries();
   } catch (error) {
     console.warn("Usando armazenamento local do navegador:", error);
     state.storageMode = "browser";
@@ -465,6 +505,8 @@ function showHome() {
 }
 
 function showWorkspaceView(viewId) {
+  if (!state.appReady) return;
+
   state.activeView = viewId;
   document.querySelector("#homeView").classList.add("is-hidden");
   document.querySelector("#workspaceView").classList.remove("is-hidden");
@@ -478,6 +520,17 @@ function showWorkspaceView(viewId) {
   });
 
   render();
+}
+
+function setAppLoading(isLoading) {
+  const homeView = document.querySelector("#homeView");
+  const loadingStatus = document.querySelector("#appLoadingStatus");
+
+  homeView.setAttribute("aria-busy", String(isLoading));
+  loadingStatus.classList.toggle("is-hidden", !isLoading);
+  document.querySelectorAll("[data-view-target]").forEach((button) => {
+    button.disabled = isLoading;
+  });
 }
 
 function populateControls() {
@@ -963,7 +1016,7 @@ async function handleEditEntrySubmit(event) {
       String(entry.id) === String(updatedEntry.id) ? updatedEntry : entry,
     );
 
-    if (state.storageMode === "browser") saveFallbackEntries();
+    saveFallbackEntries();
 
     render();
     closeEntryEditor();
@@ -1057,7 +1110,7 @@ async function handleEntrySubmit(event) {
 
   try {
     state.entries.push(await createEntry(entry));
-    if (state.storageMode === "browser") saveFallbackEntries();
+    saveFallbackEntries();
   } catch (error) {
     console.warn("Erro ao salvar lançamento:", error);
     return;
@@ -1274,7 +1327,7 @@ async function saveAsaasRevenue() {
       state.entries.push(await createEntry(entry));
     }
 
-    if (state.storageMode === "browser") saveFallbackEntries();
+    saveFallbackEntries();
 
     state.selectedMonth = months[Number(data.period.key.slice(5, 7)) - 1]?.key || state.selectedMonth;
     render();
@@ -1895,12 +1948,21 @@ window.addEventListener("resize", () => {
 });
 
 async function initializeApp() {
-  await setupSupabase();
-  await loadEntries();
-  await loadCategoryOptions();
-  await loadStoredViabilityScenarios();
-  populateControls();
-  showHome();
+  setAppLoading(true);
+
+  try {
+    await setupSupabase();
+    await loadEntries();
+    await loadCategoryOptions();
+    await loadStoredViabilityScenarios();
+  } catch (error) {
+    console.error("Erro ao inicializar o painel:", error);
+  } finally {
+    populateControls();
+    state.appReady = true;
+    setAppLoading(false);
+    showHome();
+  }
 }
 
 initializeApp();
