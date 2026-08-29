@@ -185,10 +185,15 @@
             <section class="panel form-panel">
               <form id="entryForm">
                 <div class="form-grid">
-                  <label>
-                    <span>Opção da planilha</span>
+                  <div class="category-field">
+                    <div class="category-field-header">
+                      <label for="entryCategory">Opção da planilha</label>
+                      <button class="add-category-button" id="openNewCategoryButton" type="button">
+                        + Nova opção
+                      </button>
+                    </div>
                     <select id="entryCategory" required></select>
-                  </label>
+                  </div>
 
                   <label>
                     <span>Valor</span>
@@ -509,6 +514,32 @@
         </div>
       </section>
     </main>
+
+    <dialog class="entry-dialog category-dialog" id="newCategoryDialog" aria-labelledby="newCategoryTitle">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">Opção da planilha</p>
+          <h2 id="newCategoryTitle">Criar nova opção</h2>
+        </div>
+        <button class="dialog-close-button" id="closeNewCategoryDialogButton" type="button" aria-label="Fechar">
+          Fechar
+        </button>
+      </div>
+
+      <form id="newCategoryForm">
+        <label>
+          <span>Nome da opção</span>
+          <input id="newCategoryName" type="text" maxlength="80" autocomplete="off" placeholder="Ex.: MANUTENÇÃO" required />
+        </label>
+
+        <p class="form-feedback" id="newCategoryFeedback" role="status" aria-live="polite"></p>
+
+        <div class="form-actions dialog-actions">
+          <button type="submit" id="saveNewCategoryButton">Criar opção</button>
+          <button class="secondary-button" id="cancelNewCategoryButton" type="button">Cancelar</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog class="entry-dialog" id="editEntryDialog" aria-labelledby="editEntryTitle">
       <div class="dialog-header">

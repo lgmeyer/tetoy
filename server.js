@@ -51,6 +51,16 @@ createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/category-options" && request.method === "GET") {
+      handleListCategoryOptions(response);
+      return;
+    }
+
+    if (url.pathname === "/api/category-options" && request.method === "POST") {
+      await handleCreateCategoryOption(request, response);
+      return;
+    }
+
     if (url.pathname === "/api/viability-scenarios" && request.method === "GET") {
       handleListViabilityScenarios(response);
       return;
@@ -113,7 +123,30 @@ async function openDatabase() {
       actual_monthly_flows TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS category_options (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      direction TEXT NOT NULL DEFAULT 'debit' CHECK(direction IN ('debit', 'credit')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
+
+  const insertDefaultCategory = db.prepare(`
+    INSERT OR IGNORE INTO category_options (name, direction)
+    VALUES (?, ?)
+  `);
+  [
+    ["SN CONTABILIDADE", "debit"],
+    ["ASAAS MARKETING", "debit"],
+    ["ASAAS ROYALTIES", "debit"],
+    ["SLS LOC OFICINA", "debit"],
+    ["PREF.SOROCABA", "debit"],
+    ["SLS - GESTÃO DA FROTA", "debit"],
+    ["ASAAS - ADESÃO DAS MOTOS", "debit"],
+    ["RECEITA", "credit"],
+    ["OUTRO", "debit"],
+  ].forEach((option) => insertDefaultCategory.run(...option));
 
   return db;
 }
@@ -233,6 +266,47 @@ function handleDeleteEntries(response) {
   sendJson(response, 200, { entries: [] });
 }
 
+function handleListCategoryOptions(response) {
+  const options = database
+    .prepare(`
+      SELECT name, direction
+      FROM category_options
+      ORDER BY id ASC
+    `)
+    .all();
+
+  sendJson(response, 200, { options });
+}
+
+async function handleCreateCategoryOption(request, response) {
+  const payload = await readJsonRequest(request);
+  const validationError = validateCategoryOptionPayload(payload);
+
+  if (validationError) {
+    sendJson(response, 400, { error: "invalid_category_option", message: validationError });
+    return;
+  }
+
+  const name = payload.name.trim().replace(/\s+/g, " ");
+
+  try {
+    database
+      .prepare("INSERT INTO category_options (name, direction) VALUES (?, ?)")
+      .run(name, payload.direction);
+  } catch (error) {
+    if (String(error.message).includes("UNIQUE constraint failed")) {
+      sendJson(response, 409, {
+        error: "category_option_exists",
+        message: "Essa opção já existe.",
+      });
+      return;
+    }
+    throw error;
+  }
+
+  sendJson(response, 201, { option: { name, direction: payload.direction } });
+}
+
 function handleListViabilityScenarios(response) {
   const scenarios = database
     .prepare(`
@@ -344,6 +418,17 @@ function validateEntryPayload(payload) {
 
   const value = Number(payload.value);
   if (!Number.isFinite(value) || value <= 0) return "Informe um valor maior que zero.";
+
+  return null;
+}
+
+function validateCategoryOptionPayload(payload) {
+  if (!payload || typeof payload !== "object") return "Dados ausentes.";
+  if (typeof payload.name !== "string") return "Informe o nome da opção.";
+
+  const name = payload.name.trim().replace(/\s+/g, " ");
+  if (!name || name.length > 80) return "Informe um nome com até 80 caracteres.";
+  if (!["debit", "credit"].includes(payload.direction)) return "Tipo de opção inválido.";
 
   return null;
 }

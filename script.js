@@ -13,7 +13,7 @@ const months = [
   { key: "dez", label: "DEZ", monthIndex: 11 },
 ];
 
-const spreadsheetRows = [
+const defaultSpreadsheetRows = [
   { category: "SN CONTABILIDADE", direction: "debit", values: {} },
   { category: "ASAAS MARKETING", direction: "debit", values: {} },
   { category: "ASAAS ROYALTIES", direction: "debit", values: {} },
@@ -25,7 +25,10 @@ const spreadsheetRows = [
   { category: "OUTRO", direction: "debit", values: {} },
 ];
 
+let spreadsheetRows = defaultSpreadsheetRows.map((row) => ({ ...row }));
+
 const fallbackStorageKey = "tetoy-local-entries";
+const fallbackCategoryStorageKey = "tetoy-category-options";
 const viabilityStorageKey = "tetoy-viability-scenarios";
 const supabaseConfig = {
   url: "https://wlrsieftnfqhwblklaat.supabase.co",
@@ -39,6 +42,7 @@ const state = {
   selectedMonth: "ago",
   entries: [],
   storageMode: "browser",
+  categoryStorageMode: "browser",
   scenarioStorageMode: "browser",
   scenarioStorageError: "",
   editingEntryId: null,
@@ -76,6 +80,25 @@ function loadFallbackEntries() {
 
 function saveFallbackEntries() {
   localStorage.setItem(fallbackStorageKey, JSON.stringify(state.entries));
+}
+
+function loadFallbackCategoryOptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(fallbackCategoryStorageKey) || "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFallbackCategoryOptions() {
+  const defaultNames = new Set(
+    defaultSpreadsheetRows.map((row) => row.category.toLocaleLowerCase("pt-BR")),
+  );
+  const customOptions = spreadsheetRows
+    .filter((row) => !defaultNames.has(row.category.toLocaleLowerCase("pt-BR")))
+    .map((row) => ({ name: row.category, direction: row.direction }));
+  localStorage.setItem(fallbackCategoryStorageKey, JSON.stringify(customOptions));
 }
 
 function loadViabilityScenarios() {
@@ -178,6 +201,67 @@ async function loadEntries() {
     state.storageMode = "browser";
     state.entries = loadFallbackEntries();
   }
+}
+
+function normalizeCategoryName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function mergeCategoryOptions(options = []) {
+  const merged = [];
+  const names = new Set();
+  const candidates = [
+    ...defaultSpreadsheetRows.map((row) => ({ name: row.category, direction: row.direction })),
+    ...options,
+    ...state.entries.map((entry) => ({ name: entry.category, direction: entry.direction })),
+  ];
+
+  candidates.forEach((option) => {
+    const name = normalizeCategoryName(option?.name);
+    const comparisonName = name.toLocaleLowerCase("pt-BR");
+    if (!name || names.has(comparisonName)) return;
+    names.add(comparisonName);
+    merged.push({
+      category: name,
+      direction: option?.direction === "credit" ? "credit" : "debit",
+      values: {},
+    });
+  });
+
+  spreadsheetRows = merged;
+}
+
+async function loadCategoryOptions() {
+  const browserOptions = loadFallbackCategoryOptions();
+
+  if (state.storageMode === "supabase") {
+    const { data, error } = await supabaseClient
+      .from("category_options")
+      .select("name, direction")
+      .order("created_at", { ascending: true });
+
+    if (!error) {
+      state.categoryStorageMode = "supabase";
+      mergeCategoryOptions([...(data || []), ...browserOptions]);
+      return;
+    }
+
+    console.warn("Opções personalizadas serão salvas neste navegador:", error);
+  } else if (state.storageMode === "api") {
+    try {
+      const response = await fetch("/api/category-options");
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || `API retornou ${response.status}`);
+      state.categoryStorageMode = "api";
+      mergeCategoryOptions(payload.options);
+      return;
+    } catch (error) {
+      console.warn("Opções personalizadas serão salvas neste navegador:", error);
+    }
+  }
+
+  state.categoryStorageMode = "browser";
+  mergeCategoryOptions(browserOptions);
 }
 
 async function loadStoredViabilityScenarios() {
@@ -378,14 +462,31 @@ function populateControls() {
     .join("");
   monthFilter.value = state.selectedMonth;
 
-  const categorySelect = document.querySelector("#entryCategory");
-  const categoryMarkup = categoryOptions()
-    .map((category) => `<option value="${category}">${category}</option>`)
-    .join("");
-  categorySelect.innerHTML = categoryMarkup;
-  document.querySelector("#editEntryCategory").innerHTML = categoryMarkup;
+  refreshCategoryControls();
 
   document.querySelector("#entryDate").value = new Date().toISOString().slice(0, 10);
+}
+
+function refreshCategoryControls(selectedCategory = "") {
+  const entryCategory = document.querySelector("#entryCategory");
+  const editEntryCategory = document.querySelector("#editEntryCategory");
+  const previousEntryCategory = selectedCategory || entryCategory.value;
+  const previousEditCategory = editEntryCategory.value;
+  const categoryMarkup = categoryOptions()
+    .map(
+      (category) =>
+        `<option value="${escapeAttribute(category)}">${escapeHtml(category)}</option>`,
+    )
+    .join("");
+  entryCategory.innerHTML = categoryMarkup;
+  editEntryCategory.innerHTML = categoryMarkup;
+
+  if (categoryOptions().includes(previousEntryCategory)) {
+    entryCategory.value = previousEntryCategory;
+  }
+  if (categoryOptions().includes(previousEditCategory)) {
+    editEntryCategory.value = previousEditCategory;
+  }
 }
 
 function render() {
@@ -455,7 +556,7 @@ function renderSpreadsheet() {
   document.querySelector("#spreadsheetRows").innerHTML = spreadsheetRows
     .map((row) => `
       <tr>
-        <th>${row.category}</th>
+        <th>${escapeHtml(row.category)}</th>
         ${months
           .map((month) => {
             const value = valueFor(row.category, month.key);
@@ -940,6 +1041,105 @@ async function handleEntrySubmit(event) {
   event.target.reset();
   document.querySelector("#entryDate").value = new Date().toISOString().slice(0, 10);
   showWorkspaceView("viewData");
+}
+
+function openNewCategoryDialog() {
+  const dialog = document.querySelector("#newCategoryDialog");
+  document.querySelector("#newCategoryFeedback").textContent = "";
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+  document.querySelector("#newCategoryName").focus();
+}
+
+function closeNewCategoryDialog() {
+  const dialog = document.querySelector("#newCategoryDialog");
+  if (dialog.open && typeof dialog.close === "function") {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+    resetNewCategoryForm();
+  }
+}
+
+function resetNewCategoryForm() {
+  document.querySelector("#newCategoryForm").reset();
+  document.querySelector("#newCategoryFeedback").textContent = "";
+}
+
+async function createCategoryOption(option) {
+  if (state.categoryStorageMode === "supabase") {
+    const { data, error } = await supabaseClient
+      .from("category_options")
+      .insert(option)
+      .select("name, direction")
+      .single();
+    if (error) throw new Error(error.message || "Não foi possível criar a opção no Supabase.");
+    return data;
+  }
+
+  if (state.categoryStorageMode === "api") {
+    const response = await fetch("/api/category-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(option),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.message || "Não foi possível criar a opção.");
+    }
+    return payload.option;
+  }
+
+  return option;
+}
+
+async function handleNewCategorySubmit(event) {
+  event.preventDefault();
+
+  const name = normalizeCategoryName(document.querySelector("#newCategoryName").value);
+  const feedback = document.querySelector("#newCategoryFeedback");
+  const submitButton = document.querySelector("#saveNewCategoryButton");
+  const existingCategory = categoryOptions().find(
+    (category) => category.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"),
+  );
+
+  if (!name || name.length > 80) {
+    feedback.textContent = "Informe um nome com até 80 caracteres.";
+    return;
+  }
+
+  if (existingCategory) {
+    refreshCategoryControls(existingCategory);
+    closeNewCategoryDialog();
+    return;
+  }
+
+  submitButton.disabled = true;
+  feedback.textContent = "Criando opção…";
+
+  try {
+    const option = await createCategoryOption({
+      name,
+      direction: document.querySelector("#entryDirection").value,
+    });
+    spreadsheetRows.push({
+      category: option.name,
+      direction: option.direction === "credit" ? "credit" : "debit",
+      values: {},
+    });
+    if (state.categoryStorageMode === "browser") saveFallbackCategoryOptions();
+    refreshCategoryControls(option.name);
+    render();
+    closeNewCategoryDialog();
+  } catch (error) {
+    console.warn("Erro ao criar opção da planilha:", error);
+    feedback.textContent = error.message || "Não foi possível criar a opção.";
+  } finally {
+    submitButton.disabled = false;
+  }
 }
 
 async function handleAsaasFileChange(event) {
@@ -1623,6 +1823,11 @@ document.querySelector("#monthFilter").addEventListener("change", (event) => {
 });
 
 document.querySelector("#entryForm").addEventListener("submit", handleEntrySubmit);
+document.querySelector("#openNewCategoryButton").addEventListener("click", openNewCategoryDialog);
+document.querySelector("#newCategoryForm").addEventListener("submit", handleNewCategorySubmit);
+document.querySelector("#closeNewCategoryDialogButton").addEventListener("click", closeNewCategoryDialog);
+document.querySelector("#cancelNewCategoryButton").addEventListener("click", closeNewCategoryDialog);
+document.querySelector("#newCategoryDialog").addEventListener("close", resetNewCategoryForm);
 document.querySelector("#clearEntriesButton").addEventListener("click", clearEntries);
 document.querySelector("#asaasCsvFile").addEventListener("change", handleAsaasFileChange);
 document.querySelector("#saveAsaasRevenueButton").addEventListener("click", saveAsaasRevenue);
@@ -1667,6 +1872,7 @@ window.addEventListener("resize", () => {
 async function initializeApp() {
   await setupSupabase();
   await loadEntries();
+  await loadCategoryOptions();
   await loadStoredViabilityScenarios();
   populateControls();
   showHome();

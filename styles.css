@@ -654,6 +654,37 @@ td {
   gap: 14px;
 }
 
+.category-field {
+  display: grid;
+  gap: 7px;
+}
+
+.category-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.category-field-header label {
+  display: block;
+}
+
+.add-category-button {
+  min-height: auto;
+  padding: 2px 4px;
+  color: var(--blue);
+  border: 0;
+  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.add-category-button:hover {
+  text-decoration: underline;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -721,6 +752,10 @@ input {
   color: var(--ink);
   background: var(--surface);
   box-shadow: 0 24px 80px rgba(24, 36, 53, 0.24);
+}
+
+.category-dialog {
+  width: min(520px, calc(100% - 28px));
 }
 
 .entry-dialog::backdrop {
