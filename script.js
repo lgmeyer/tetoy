@@ -176,16 +176,33 @@ async function loadEntries() {
 
     if (error) {
       console.warn("Erro ao carregar Supabase:", error);
-      state.entries = [];
+      await loadEntriesWithoutSupabase();
       return;
     }
 
-    state.entries = data.map(normalizeSupabaseEntry);
+    const remoteEntries = data.map(normalizeSupabaseEntry);
+    const browserEntries = loadFallbackEntries();
+
+    if (!remoteEntries.length && browserEntries.length) {
+      console.warn("Supabase sem lançamentos; recuperando os dados deste navegador.");
+      state.storageMode = "browser";
+      state.entries = browserEntries;
+      return;
+    }
+
+    state.entries = remoteEntries;
     return;
   }
 
+  await loadEntriesWithoutSupabase();
+}
+
+async function loadEntriesWithoutSupabase() {
+  const browserEntries = loadFallbackEntries();
+
   if (window.location.protocol === "file:") {
-    state.entries = loadFallbackEntries();
+    state.storageMode = "browser";
+    state.entries = browserEntries;
     return;
   }
 
@@ -194,12 +211,20 @@ async function loadEntries() {
     if (!response.ok) throw new Error(`API retornou ${response.status}`);
 
     const payload = await response.json();
+    const apiEntries = Array.isArray(payload.entries) ? payload.entries : [];
+
+    if (!apiEntries.length && browserEntries.length) {
+      state.storageMode = "browser";
+      state.entries = browserEntries;
+      return;
+    }
+
     state.storageMode = "api";
-    state.entries = Array.isArray(payload.entries) ? payload.entries : [];
+    state.entries = apiEntries;
   } catch (error) {
     console.warn("Usando armazenamento local do navegador:", error);
     state.storageMode = "browser";
-    state.entries = loadFallbackEntries();
+    state.entries = browserEntries;
   }
 }
 
