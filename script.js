@@ -427,7 +427,8 @@ function renderAuth() {
 async function loadAuthenticatedData() {
   state.storageMode = "firestore";
   state.authError = "";
-  await Promise.all([loadEntries(), loadCategoryOptions(), loadStoredViabilityScenarios()]);
+  await loadEntries();
+  await Promise.all([loadCategoryOptions(), loadStoredViabilityScenarios()]);
   populateControls();
 }
 
