@@ -55,37 +55,37 @@ test("calcula payback com fração do período e identifica quando não há reto
 
 test("calcula a viabilidade mensal e anualiza a TIR", () => {
   const result = calculateViability({
-    initialInvestment: 10000,
     annualRate: 0.12,
     months: 24,
     monthlyNetInflow: 600,
+    actualMonthlyFlows: [-10000],
   });
 
   assert.ok(result.npv > 2000);
   assert.ok(result.annualIrr > 0.4);
   assert.equal(result.paybackMonths, 16.666666666666668);
-  assert.equal(result.totalNetReturn, 4400);
+  assert.equal(result.totalNetReturn, 3800);
 });
 
 test("usa valores realizados, projeta apenas períodos sem dados e soma o residual no fim", () => {
   const result = calculateViability({
-    initialInvestment: 1000,
     annualRate: 0,
     months: 4,
     monthlyNetInflow: 300,
     residualValue: 500,
-    actualMonthlyFlows: [100, 200, null, undefined],
+    actualMonthlyFlows: [-1000, 100, 200, null],
   });
 
-  assert.deepEqual(result.cashFlows, [-1000, 100, 200, 300, 800]);
-  assert.equal(result.npv, 400);
-  assert.equal(result.totalNetReturn, 400);
-  assert.equal(result.actualPeriodCount, 2);
-  assert.equal(result.projectedPeriodCount, 2);
+  assert.deepEqual(result.cashFlows, [-1000, 100, 200, 800]);
+  assert.equal(result.npv, 100);
+  assert.equal(result.totalNetReturn, 100);
+  assert.equal(result.actualPeriodCount, 3);
+  assert.equal(result.projectedPeriodCount, 1);
 });
 
 test("rejeita dados incompletos ou fora dos limites", () => {
-  assert.equal(calculateViability({ initialInvestment: 0, annualRate: 0.1, months: 12, monthlyNetInflow: 500 }), null);
-  assert.equal(calculateViability({ initialInvestment: 1000, annualRate: -0.1, months: 12, monthlyNetInflow: 500 }), null);
-  assert.equal(calculateViability({ initialInvestment: 1000, annualRate: 0.1, months: 12, monthlyNetInflow: 500, residualValue: -1 }), null);
+  assert.equal(calculateViability({ annualRate: 0.1, months: 12, monthlyNetInflow: 500 }), null);
+  assert.equal(calculateViability({ annualRate: -0.1, months: 12, monthlyNetInflow: 500, actualMonthlyFlows: [-1000] }), null);
+  assert.equal(calculateViability({ annualRate: 0.1, months: 12, monthlyNetInflow: 500, residualValue: -1, actualMonthlyFlows: [-1000] }), null);
+  assert.equal(calculateViability({ annualRate: 0.1, months: 12, monthlyNetInflow: 500, actualMonthlyFlows: [1000] }), null);
 });

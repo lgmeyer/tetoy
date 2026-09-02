@@ -391,14 +391,6 @@
 
                   <div class="viability-form-grid">
                     <label>
-                      <span>Investimento inicial</span>
-                      <span class="input-with-prefix">
-                        <i aria-hidden="true">R$</i>
-                        <input id="initialInvestment" type="number" min="0.01" step="0.01" placeholder="0,00" required />
-                      </span>
-                    </label>
-
-                    <label>
                       <span>TMA ao ano</span>
                       <span class="input-with-suffix">
                         <input id="minimumAttractiveRate" type="number" min="0" step="0.01" placeholder="0,00" required />
@@ -432,7 +424,7 @@
                   </div>
 
                   <p class="calculation-note">
-                    Os meses com lançamentos usam o resultado líquido de “Visualizar dados”. A entrada mensal é usada somente nos meses ainda sem dados, e o valor residual é somado ao fluxo do último mês, representando o último dia do projeto.
+                    O primeiro fluxo usa o resultado líquido do primeiro mês de “Visualizar dados” e precisa ser negativo, pois representa o investimento. A entrada mensal é usada somente nos meses seguintes ainda sem dados, e o valor residual é somado ao fluxo do último mês.
                   </p>
 
                   <p class="form-feedback" id="viabilityFeedback" role="status" aria-live="polite"></p>
@@ -483,7 +475,7 @@
                 </dl>
 
                 <p class="viability-explanation" id="viabilityExplanation">
-                  Preencha as cinco premissas para calcular a viabilidade deste cenário.
+                  Preencha as quatro premissas e registre um primeiro fluxo negativo para calcular a viabilidade deste cenário.
                 </p>
               </article>
             </section>

@@ -128,7 +128,6 @@ function normalizeFirestoreScenario(documentSnapshot) {
   return {
     id: documentSnapshot.id,
     name: scenario.name,
-    initialInvestment: Number(scenario.initialInvestment),
     annualRate: Number(scenario.annualRate),
     months: Number(scenario.months),
     monthlyNetInflow: Number(scenario.monthlyNetInflow),
@@ -1206,14 +1205,13 @@ function countLabel(value, singular, plural) {
 }
 
 function readViabilityAssumptions() {
-  const investmentField = document.querySelector("#initialInvestment");
   const rateField = document.querySelector("#minimumAttractiveRate");
   const termField = document.querySelector("#projectTermMonths");
   const inflowField = document.querySelector("#monthlyNetInflow");
   const residualField = document.querySelector("#residualValue");
 
   if (
-    [investmentField, rateField, termField, inflowField, residualField]
+    [rateField, termField, inflowField, residualField]
       .some((field) => field.value === "")
   ) {
     return null;
@@ -1221,7 +1219,6 @@ function readViabilityAssumptions() {
 
   const term = Number(termField.value);
   const assumptions = {
-    initialInvestment: Number(investmentField.value),
     annualRate: Number(rateField.value) / 100,
     months: term,
     monthlyNetInflow: Number(inflowField.value),
@@ -1249,7 +1246,7 @@ function renderViability() {
     delete panel.dataset.viable;
     npv.classList.remove("negative-amount");
     document.querySelector("#viabilityExplanation").textContent =
-      "Preencha as cinco premissas para calcular a viabilidade deste cenário.";
+      "Preencha as quatro premissas e registre um primeiro fluxo negativo para calcular a viabilidade deste cenário.";
     renderViabilityCashFlowChart(null, null);
     return;
   }
@@ -1288,17 +1285,16 @@ function renderViabilityCashFlowChart(assumptions, result) {
   const basePeriodFlows = result.periodFlows.map((value, index) =>
     index === result.periodFlows.length - 1 ? value - assumptions.residualValue : value,
   );
-  const items = [
-    { label: "Início", value: -assumptions.initialInvestment, type: "investment" },
-    ...basePeriodFlows.map((value, index) => ({
+  const items = basePeriodFlows.map((value, index) => ({
       label: projectPeriodLabel(index),
       value,
-      type: assumptions.actualMonthlyFlows[index] === null
-        || assumptions.actualMonthlyFlows[index] === undefined
-        ? "projected"
-        : "actual",
-    })),
-  ];
+      type: index === 0
+        ? "investment"
+        : (assumptions.actualMonthlyFlows[index] === null
+          || assumptions.actualMonthlyFlows[index] === undefined)
+          ? "projected"
+          : "actual",
+    }));
 
   const accessibleItems = items.slice(0, 60).map(
     (item) => `${item.label}: ${currency.format(item.value)} (${cashFlowTypeLabel(item.type)})`,
@@ -1424,7 +1420,7 @@ function clearCanvas(canvas) {
 
 function cashFlowTypeLabel(type) {
   return {
-    investment: "investimento inicial",
+    investment: "investimento",
     actual: "realizado",
     projected: "projetado",
   }[type];
@@ -1465,7 +1461,7 @@ function renderSavedScenarios() {
             <time datetime="${escapeAttribute(scenario.createdAt)}">${escapeHtml(savedAt)}</time>
           </header>
           <div class="saved-scenario-inputs">
-            <div><span>Investimento</span><strong>${currency.format(scenario.initialInvestment)}</strong></div>
+            <div><span>1º fluxo (investimento)</span><strong>${result ? currency.format(result.cashFlows[0]) : "—"}</strong></div>
             <div><span>TMA anual</span><strong>${formatPercent(scenario.annualRate)}</strong></div>
             <div><span>Prazo</span><strong>${scenario.months} meses</strong></div>
             <div><span>Entrada mensal</span><strong>${currency.format(scenario.monthlyNetInflow)}</strong></div>
@@ -1494,7 +1490,6 @@ async function createViabilityScenario(scenario) {
 
   await firestoreCollection("viabilityScenarios").doc(scenario.id).set({
     name: scenario.name,
-    initialInvestment: Number(scenario.initialInvestment),
     annualRate: Number(scenario.annualRate),
     months: Number(scenario.months),
     monthlyNetInflow: Number(scenario.monthlyNetInflow),
@@ -1557,7 +1552,6 @@ function loadViabilityScenario(scenarioId) {
   if (!scenario) return;
 
   document.querySelector("#viabilityScenarioName").value = scenario.name;
-  document.querySelector("#initialInvestment").value = scenario.initialInvestment;
   document.querySelector("#minimumAttractiveRate").value = scenario.annualRate * 100;
   document.querySelector("#projectTermMonths").value = scenario.months;
   document.querySelector("#monthlyNetInflow").value = scenario.monthlyNetInflow;

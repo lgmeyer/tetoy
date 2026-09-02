@@ -98,23 +98,19 @@
   }
 
   function calculateViability({
-    initialInvestment,
     annualRate,
     months,
     monthlyNetInflow,
     residualValue = 0,
     actualMonthlyFlows = [],
   }) {
-    const investment = Number(initialInvestment);
     const rate = Number(annualRate);
     const term = Number(months);
     const netInflow = Number(monthlyNetInflow);
     const residual = Number(residualValue);
 
     if (
-      !Number.isFinite(investment)
-      || investment <= 0
-      || !Number.isFinite(rate)
+      !Number.isFinite(rate)
       || rate < 0
       || !Number.isSafeInteger(term)
       || term <= 0
@@ -134,10 +130,15 @@
         : Number(actualValue);
     });
 
-    if (periodFlows.some((value) => !Number.isFinite(value))) return null;
+    if (
+      periodFlows.some((value) => !Number.isFinite(value))
+      || periodFlows[0] >= 0
+    ) {
+      return null;
+    }
 
     periodFlows[term - 1] += residual;
-    const cashFlows = [-investment, ...periodFlows];
+    const cashFlows = [...periodFlows];
     const monthlyIrr = calculateIrr(cashFlows);
 
     return {
@@ -147,7 +148,7 @@
       monthlyIrr,
       annualIrr: monthlyIrr === null ? null : ((1 + monthlyIrr) ** 12) - 1,
       paybackMonths: calculatePayback(cashFlows),
-      totalNetReturn: periodFlows.reduce((total, value) => total + value, 0) - investment,
+      totalNetReturn: periodFlows.reduce((total, value) => total + value, 0),
       periodFlows,
       actualPeriodCount: actualMonthlyFlows
         .slice(0, term)
