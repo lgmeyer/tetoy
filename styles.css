@@ -132,6 +132,36 @@ h3 {
   text-align: center;
 }
 
+.home-auth-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: min(100%, 778px);
+  margin: 0 auto;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.home-auth-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.home-auth-card button {
+  flex: 0 0 auto;
+  padding: 0 16px;
+  color: #ffffff;
+  border-color: var(--blue);
+  background: var(--blue);
+  font-weight: 850;
+}
+
 .choice-card {
   display: grid;
   gap: 10px;
@@ -1274,6 +1304,7 @@ input {
   }
 
   .brand-block,
+  .home-auth-card,
   .topbar,
   .toolbar,
   .panel-header,
@@ -1287,6 +1318,10 @@ input {
   .brand-block {
     display: flex;
     justify-content: flex-start;
+  }
+
+  .home-auth-card button {
+    width: 100%;
   }
 
   .choice-grid,

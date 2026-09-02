@@ -21,6 +21,11 @@
           </div>
         </div>
 
+        <section class="home-auth-card" aria-label="Acesso com Google">
+          <p id="homeAuthStatus">Verificando acesso ao Google Firestore…</p>
+          <button id="signInButton" type="button">Entrar com Google</button>
+        </section>
+
         <div class="choice-grid" aria-label="Escolha uma ação">
           <button class="choice-card" type="button" data-view-target="viewData">
             <span>Visualizar dados</span>
@@ -81,12 +86,16 @@
 
           <section class="auth-box" aria-label="Acesso aos dados">
             <p class="eyebrow">Acesso</p>
-            <p id="authStatus">Acesso direto aos dados do Supabase.</p>
+            <p id="authStatus">Verificando acesso ao Google Firestore…</p>
+            <div class="auth-actions">
+              <button id="sidebarSignInButton" type="button">Entrar com Google</button>
+              <button class="secondary-dark-button is-hidden" id="signOutButton" type="button">Sair</button>
+            </div>
           </section>
 
           <div class="sidebar-note">
-            <span id="storageLabel">Supabase</span>
-            <p id="storageDetail">Dados persistentes sem login nesta versão.</p>
+            <span id="storageLabel">Protegido</span>
+            <p id="storageDetail">Nenhum dado é exibido sem autenticação.</p>
           </div>
         </aside>
 
@@ -603,7 +612,10 @@
 
     <script src="asaas-csv.js"></script>
     <script src="dashboard-calculations.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

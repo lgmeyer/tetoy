@@ -27,26 +27,22 @@ const defaultSpreadsheetRows = [
 
 let spreadsheetRows = defaultSpreadsheetRows.map((row) => ({ ...row }));
 
-const fallbackStorageKey = "tetoy-local-entries";
-const fallbackCategoryStorageKey = "tetoy-category-options";
-const viabilityStorageKey = "tetoy-viability-scenarios";
-const supabaseQueryTimeoutMs = 5000;
-const supabaseConfig = {
-  url: "https://wlrsieftnfqhwblklaat.supabase.co",
-  publishableKey: "sb_publishable_YdKXt7020dV8YNjS3K6wiA_UCVAShra",
-};
+const firebaseConfig = globalThis.TetoyFirebaseConfig || {};
 
-let supabaseClient = null;
+let firebaseAuth = null;
+let firestore = null;
 
 const state = {
   appReady: false,
   activeView: null,
   selectedMonth: "ago",
   entries: [],
-  storageMode: "browser",
-  categoryStorageMode: "browser",
-  scenarioStorageMode: "browser",
+  storageMode: "unavailable",
+  categoryStorageMode: "unavailable",
+  scenarioStorageMode: "unavailable",
   scenarioStorageError: "",
+  authUser: null,
+  authError: "",
   editingEntryId: null,
   asaasImportData: null,
   asaasImportFileName: "",
@@ -71,201 +67,89 @@ const {
   calculateViability,
 } = globalThis.DashboardCalculations;
 
-function loadFallbackEntries() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(fallbackStorageKey) || "[]");
-    return Array.isArray(saved) ? saved : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveFallbackEntries() {
-  localStorage.setItem(fallbackStorageKey, JSON.stringify(state.entries));
-}
-
-function entrySignature(entry) {
-  return [
-    normalizeCategoryName(entry.category).toLocaleLowerCase("pt-BR"),
-    Number(entry.value),
-    entry.direction,
-    entry.date,
-    String(entry.note || "").trim(),
-  ].join("|");
-}
-
-function mergeStoredEntries(primaryEntries, browserEntries) {
-  const primaryIds = new Set(primaryEntries.map((entry) => String(entry.id)));
-  const primarySignatures = new Set(primaryEntries.map(entrySignature));
-  const browserOnlyEntries = browserEntries.filter(
-    (entry) =>
-      !primaryIds.has(String(entry.id)) && !primarySignatures.has(entrySignature(entry)),
+function isFirebaseConfigured() {
+  return ["apiKey", "authDomain", "projectId", "appId"].every(
+    (key) => typeof firebaseConfig[key] === "string" && firebaseConfig[key].trim(),
   );
-
-  return { entries: [...primaryEntries, ...browserOnlyEntries], browserOnlyEntries };
 }
 
-function loadFallbackCategoryOptions() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(fallbackCategoryStorageKey) || "[]");
-    return Array.isArray(saved) ? saved : [];
-  } catch {
-    return [];
-  }
+function waitForInitialAuthState() {
+  return new Promise((resolve, reject) => {
+    const unsubscribe = firebaseAuth.onAuthStateChanged(
+      (user) => {
+        unsubscribe();
+        resolve(user);
+      },
+      reject,
+    );
+  });
 }
 
-function saveFallbackCategoryOptions() {
-  const defaultNames = new Set(
-    defaultSpreadsheetRows.map((row) => row.category.toLocaleLowerCase("pt-BR")),
-  );
-  const customOptions = spreadsheetRows
-    .filter((row) => !defaultNames.has(row.category.toLocaleLowerCase("pt-BR")))
-    .map((row) => ({ name: row.category, direction: row.direction }));
-  localStorage.setItem(fallbackCategoryStorageKey, JSON.stringify(customOptions));
-}
-
-function loadViabilityScenarios() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(viabilityStorageKey) || "[]");
-    if (!Array.isArray(saved)) return [];
-
-    return saved.map((scenario) => ({
-      ...scenario,
-      residualValue: Number(scenario.residualValue || 0),
-      actualMonthlyFlows: Array.isArray(scenario.actualMonthlyFlows)
-        ? scenario.actualMonthlyFlows
-        : actualMonthlyFlowsFor(Number(scenario.months)),
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function saveViabilityScenarios() {
-  localStorage.setItem(viabilityStorageKey, JSON.stringify(state.viabilityScenarios));
-}
-
-function normalizeSupabaseScenario(scenario) {
-  return {
-    id: scenario.id,
-    name: scenario.name,
-    initialInvestment: Number(scenario.initial_investment),
-    annualRate: Number(scenario.annual_rate),
-    months: Number(scenario.months),
-    monthlyNetInflow: Number(scenario.monthly_net_inflow),
-    residualValue: Number(scenario.residual_value || 0),
-    actualMonthlyFlows: Array.isArray(scenario.actual_monthly_flows)
-      ? scenario.actual_monthly_flows
-      : [],
-    createdAt: scenario.created_at,
-  };
-}
-
-function serializeSupabaseScenario(scenario) {
-  return {
-    id: scenario.id,
-    name: scenario.name,
-    initial_investment: scenario.initialInvestment,
-    annual_rate: scenario.annualRate,
-    months: scenario.months,
-    monthly_net_inflow: scenario.monthlyNetInflow,
-    residual_value: scenario.residualValue || 0,
-    actual_monthly_flows: scenario.actualMonthlyFlows || [],
-    created_at: scenario.createdAt,
-  };
-}
-
-async function setupSupabase() {
-  if (!window.supabase?.createClient) {
-    state.storageMode = "browser";
+async function setupFirebase() {
+  if (!globalThis.firebase?.initializeApp || !isFirebaseConfigured()) {
+    state.storageMode = "unavailable";
+    state.authError = "A configuração do Firebase ainda não foi concluída.";
     return;
   }
 
-  supabaseClient = window.supabase.createClient(
-    supabaseConfig.url,
-    supabaseConfig.publishableKey,
-  );
+  const app = globalThis.firebase.apps.length
+    ? globalThis.firebase.app()
+    : globalThis.firebase.initializeApp(firebaseConfig);
+  firebaseAuth = app.auth();
+  firestore = app.firestore();
+  firebaseAuth.useDeviceLanguage();
 
-  state.storageMode = "supabase";
+  state.authUser = await waitForInitialAuthState();
+  state.storageMode = state.authUser ? "firestore" : "signed-out";
+}
+
+function firestoreCollection(name) {
+  if (!firestore || !state.authUser) {
+    throw new Error("Entre com sua conta Google para acessar os dados.");
+  }
+  return firestore.collection("users").doc(state.authUser.uid).collection(name);
+}
+
+function normalizeFirestoreEntry(documentSnapshot) {
+  const entry = documentSnapshot.data();
+  return {
+    id: documentSnapshot.id,
+    category: entry.category,
+    value: Number(entry.value),
+    direction: entry.direction,
+    date: entry.date,
+    note: entry.note || "",
+    createdAt: entry.createdAt || "",
+  };
+}
+
+function normalizeFirestoreScenario(documentSnapshot) {
+  const scenario = documentSnapshot.data();
+  return {
+    id: documentSnapshot.id,
+    name: scenario.name,
+    initialInvestment: Number(scenario.initialInvestment),
+    annualRate: Number(scenario.annualRate),
+    months: Number(scenario.months),
+    monthlyNetInflow: Number(scenario.monthlyNetInflow),
+    residualValue: Number(scenario.residualValue || 0),
+    actualMonthlyFlows: Array.isArray(scenario.actualMonthlyFlows)
+      ? scenario.actualMonthlyFlows
+      : [],
+    createdAt: scenario.createdAt || "",
+  };
 }
 
 async function loadEntries() {
-  if (state.storageMode === "supabase") {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), supabaseQueryTimeoutMs);
-    let data;
-    let error;
-
-    try {
-      ({ data, error } = await supabaseClient
-        .from("entries")
-        .select("id, category, value, direction, date, note, created_at")
-        .order("date", { ascending: false })
-        .order("id", { ascending: false })
-        .abortSignal(controller.signal));
-    } catch (requestError) {
-      error = requestError;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (error || !Array.isArray(data)) {
-      console.warn("Erro ao carregar Supabase:", error);
-      await loadEntriesWithoutSupabase();
-      return;
-    }
-
-    const remoteEntries = data.map(normalizeSupabaseEntry);
-    const browserEntries = loadFallbackEntries();
-
-    if (!remoteEntries.length && browserEntries.length) {
-      console.warn("Supabase sem lançamentos; recuperando os dados deste navegador.");
-      state.storageMode = "browser";
-      state.entries = browserEntries;
-      return;
-    }
-
-    const merged = mergeStoredEntries(remoteEntries, browserEntries);
-    state.entries = merged.entries;
-    if (merged.browserOnlyEntries.length) state.storageMode = "browser";
-    saveFallbackEntries();
+  if (state.storageMode !== "firestore") {
+    state.entries = [];
     return;
   }
 
-  await loadEntriesWithoutSupabase();
-}
-
-async function loadEntriesWithoutSupabase() {
-  const browserEntries = loadFallbackEntries();
-
-  if (window.location.protocol === "file:") {
-    state.storageMode = "browser";
-    state.entries = browserEntries;
-    return;
-  }
-
-  try {
-    const response = await fetch("/api/entries");
-    if (!response.ok) throw new Error(`API retornou ${response.status}`);
-
-    const payload = await response.json();
-    const apiEntries = Array.isArray(payload.entries) ? payload.entries : [];
-
-    if (!apiEntries.length && browserEntries.length) {
-      state.storageMode = "browser";
-      state.entries = browserEntries;
-      return;
-    }
-
-    const merged = mergeStoredEntries(apiEntries, browserEntries);
-    state.storageMode = merged.browserOnlyEntries.length ? "browser" : "api";
-    state.entries = merged.entries;
-    saveFallbackEntries();
-  } catch (error) {
-    console.warn("Usando armazenamento local do navegador:", error);
-    state.storageMode = "browser";
-    state.entries = browserEntries;
-  }
+  const snapshot = await firestoreCollection("entries").get();
+  state.entries = snapshot.docs
+    .map(normalizeFirestoreEntry)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
 }
 
 function normalizeCategoryName(value) {
@@ -297,115 +181,33 @@ function mergeCategoryOptions(options = []) {
 }
 
 async function loadCategoryOptions() {
-  const browserOptions = loadFallbackCategoryOptions();
-
-  if (state.storageMode === "supabase") {
-    const { data, error } = await supabaseClient
-      .from("category_options")
-      .select("name, direction")
-      .order("created_at", { ascending: true });
-
-    if (!error) {
-      state.categoryStorageMode = "supabase";
-      mergeCategoryOptions([...(data || []), ...browserOptions]);
-      return;
-    }
-
-    console.warn("Opções personalizadas serão salvas neste navegador:", error);
-  } else if (state.storageMode === "api") {
-    try {
-      const response = await fetch("/api/category-options");
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `API retornou ${response.status}`);
-      state.categoryStorageMode = "api";
-      mergeCategoryOptions(payload.options);
-      return;
-    } catch (error) {
-      console.warn("Opções personalizadas serão salvas neste navegador:", error);
-    }
-  }
-
-  state.categoryStorageMode = "browser";
-  mergeCategoryOptions(browserOptions);
-}
-
-async function loadStoredViabilityScenarios() {
-  const browserScenarios = loadViabilityScenarios();
-
-  if (state.storageMode === "supabase") {
-    const { data, error } = await supabaseClient
-      .from("viability_scenarios")
-      .select("id, name, initial_investment, annual_rate, months, monthly_net_inflow, residual_value, actual_monthly_flows, created_at")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.warn("Erro ao carregar cenários do Supabase:", error);
-      state.scenarioStorageMode = "unavailable";
-      state.scenarioStorageError =
-        "A tabela de cenários ainda não está disponível no Supabase. Aplique a migração antes de salvar em produção.";
-      state.viabilityScenarios = browserScenarios;
-      return;
-    }
-
-    state.scenarioStorageMode = "supabase";
-    state.scenarioStorageError = "";
-    const remoteScenarios = data.map(normalizeSupabaseScenario);
-    const remoteIds = new Set(remoteScenarios.map((scenario) => String(scenario.id)));
-    const localOnlyScenarios = browserScenarios.filter(
-      (scenario) => !remoteIds.has(String(scenario.id)),
-    );
-
-    if (localOnlyScenarios.length) {
-      const { data: migratedData, error: migrationError } = await supabaseClient
-        .from("viability_scenarios")
-        .upsert(localOnlyScenarios.map(serializeSupabaseScenario), { onConflict: "id" })
-        .select("id, name, initial_investment, annual_rate, months, monthly_net_inflow, residual_value, actual_monthly_flows, created_at");
-
-      if (migrationError) {
-        console.warn("Erro ao migrar cenários locais para o Supabase:", migrationError);
-        state.scenarioStorageError =
-          "Os cenários da base foram carregados, mas alguns cenários deste navegador não puderam ser migrados.";
-      } else {
-        remoteScenarios.push(...migratedData.map(normalizeSupabaseScenario));
-        localStorage.removeItem(viabilityStorageKey);
-      }
-    }
-
-    state.viabilityScenarios = remoteScenarios.sort(
-      (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
-    );
+  if (state.storageMode !== "firestore") {
+    state.categoryStorageMode = state.storageMode;
+    mergeCategoryOptions();
     return;
   }
 
-  if (state.storageMode === "api") {
-    try {
-      const response = await fetch("/api/viability-scenarios");
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `API retornou ${response.status}`);
-      state.scenarioStorageMode = "api";
-      state.scenarioStorageError = "";
-      state.viabilityScenarios = Array.isArray(payload.scenarios) ? payload.scenarios : [];
-      return;
-    } catch (error) {
-      console.warn("Erro ao carregar cenários da API:", error);
-      state.scenarioStorageError = "Não foi possível acessar o armazenamento de cenários.";
-    }
-  }
-
-  state.scenarioStorageMode = "browser";
-  state.viabilityScenarios = browserScenarios;
+  const snapshot = await firestoreCollection("categoryOptions").get();
+  const options = snapshot.docs
+    .map((documentSnapshot) => documentSnapshot.data())
+    .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  state.categoryStorageMode = "firestore";
+  mergeCategoryOptions(options);
 }
 
-function normalizeSupabaseEntry(entry) {
-  return {
-    id: entry.id,
-    category: entry.category,
-    value: Number(entry.value),
-    direction: entry.direction,
-    date: entry.date,
-    note: entry.note || "",
-    createdAt: entry.created_at,
-  };
+async function loadStoredViabilityScenarios() {
+  if (state.storageMode !== "firestore") {
+    state.scenarioStorageMode = state.storageMode;
+    state.viabilityScenarios = [];
+    return;
+  }
+
+  const snapshot = await firestoreCollection("viabilityScenarios").get();
+  state.scenarioStorageMode = "firestore";
+  state.scenarioStorageError = "";
+  state.viabilityScenarios = snapshot.docs
+    .map(normalizeFirestoreScenario)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function categoryOptions() {
@@ -505,7 +307,7 @@ function showHome() {
 }
 
 function showWorkspaceView(viewId) {
-  if (!state.appReady) return;
+  if (!state.appReady || state.storageMode !== "firestore") return;
 
   state.activeView = viewId;
   document.querySelector("#homeView").classList.add("is-hidden");
@@ -529,7 +331,7 @@ function setAppLoading(isLoading) {
   homeView.setAttribute("aria-busy", String(isLoading));
   loadingStatus.classList.toggle("is-hidden", !isLoading);
   document.querySelectorAll("[data-view-target]").forEach((button) => {
-    button.disabled = isLoading;
+    button.disabled = isLoading || state.storageMode !== "firestore";
   });
 }
 
@@ -582,31 +384,96 @@ function render() {
 function renderScenarioStorage() {
   const badge = document.querySelector("#scenarioStorageBadge");
   const labels = {
-    supabase: "Cenários salvos no Supabase",
-    api: "Cenários salvos no servidor",
-    browser: "Cenários salvos neste navegador",
-    unavailable: "Configuração do Supabase pendente",
+    firestore: "Cenários salvos no Google Firestore",
+    "signed-out": "Entre com Google para acessar",
+    unavailable: "Configuração do Firebase pendente",
   };
   badge.textContent = labels[state.scenarioStorageMode] || "Armazenamento indisponível";
-  badge.dataset.tone = state.scenarioStorageMode === "unavailable" ? "warning" : "success";
+  badge.dataset.tone = state.scenarioStorageMode === "firestore" ? "success" : "warning";
 }
 
 function renderAuth() {
-  const isSupabase = state.storageMode === "supabase";
+  const isSignedIn = state.storageMode === "firestore" && state.authUser;
+  const identity = state.authUser?.displayName || state.authUser?.email || "Conta Google";
+  const signedOutMessage = state.authError || "Entre com Google para acessar seus dados.";
 
-  document.querySelector("#authStatus").textContent = isSupabase
-    ? "Acesso direto: visualize e insira dados sem login."
-    : "Modo local temporário: os dados ficam neste navegador.";
+  document.querySelector("#authStatus").textContent = isSignedIn
+    ? `Conectado como ${identity}.`
+    : signedOutMessage;
+  document.querySelector("#homeAuthStatus").textContent = isSignedIn
+    ? `Conectado como ${identity}`
+    : signedOutMessage;
+  document.querySelector("#storageLabel").textContent = isSignedIn ? "Firestore" : "Protegido";
+  document.querySelector("#storageDetail").textContent = isSignedIn
+    ? "Dados persistentes vinculados à sua conta Google."
+    : "Nenhum dado é exibido sem autenticação.";
 
-  document.querySelector("#storageLabel").textContent = isSupabase ? "Supabase" : "Local";
-  document.querySelector("#storageDetail").textContent = isSupabase
-    ? "Dados persistentes sem login nesta versão."
-    : "Fallback temporário no navegador.";
-
-  const formFields = document.querySelectorAll("#entryForm input, #entryForm select, #entryForm button");
-  formFields.forEach((field) => {
-    field.disabled = false;
+  document.querySelectorAll("#signInButton, #sidebarSignInButton").forEach((button) => {
+    button.classList.toggle("is-hidden", isSignedIn || state.storageMode === "unavailable");
   });
+  document.querySelector("#signOutButton").classList.toggle("is-hidden", !isSignedIn);
+
+  const protectedFields = document.querySelectorAll(
+    "#entryForm input, #entryForm select, #entryForm button, #clearEntriesButton",
+  );
+  protectedFields.forEach((field) => {
+    field.disabled = !isSignedIn;
+  });
+  document.querySelectorAll("[data-view-target]").forEach((button) => {
+    button.disabled = !isSignedIn;
+  });
+}
+
+async function loadAuthenticatedData() {
+  state.storageMode = "firestore";
+  state.authError = "";
+  await Promise.all([loadEntries(), loadCategoryOptions(), loadStoredViabilityScenarios()]);
+  populateControls();
+}
+
+function resetAuthenticatedData() {
+  state.entries = [];
+  state.viabilityScenarios = [];
+  state.categoryStorageMode = state.storageMode;
+  state.scenarioStorageMode = state.storageMode;
+  mergeCategoryOptions();
+  populateControls();
+}
+
+async function signInWithGoogle() {
+  if (!firebaseAuth) return;
+
+  state.authError = "";
+  setAppLoading(true);
+  try {
+    const provider = new globalThis.firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    const result = await firebaseAuth.signInWithPopup(provider);
+    state.authUser = result.user;
+    await loadAuthenticatedData();
+  } catch (error) {
+    console.warn("Erro ao entrar com Google:", error);
+    state.storageMode = "signed-out";
+    state.authError = error.code === "auth/popup-closed-by-user"
+      ? "O login foi cancelado. Tente novamente."
+      : "Não foi possível entrar com Google.";
+  } finally {
+    state.appReady = true;
+    setAppLoading(false);
+    render();
+    showHome();
+  }
+}
+
+async function signOut() {
+  if (!firebaseAuth) return;
+  await firebaseAuth.signOut();
+  state.authUser = null;
+  state.storageMode = "signed-out";
+  state.authError = "";
+  resetAuthenticatedData();
+  render();
+  showHome();
 }
 
 function renderMetrics() {
@@ -1016,8 +883,6 @@ async function handleEditEntrySubmit(event) {
       String(entry.id) === String(updatedEntry.id) ? updatedEntry : entry,
     );
 
-    saveFallbackEntries();
-
     render();
     closeEntryEditor();
   } catch (error) {
@@ -1029,69 +894,52 @@ async function handleEditEntrySubmit(event) {
 }
 
 async function updateEntry(entryId, changes) {
-  if (state.storageMode === "supabase") {
-    const { data, error } = await supabaseClient
-      .from("entries")
-      .update(changes)
-      .eq("id", entryId)
-      .select("id, category, value, direction, date, note, created_at")
-      .single();
-
-    if (error) throw new Error(error.message || "Não foi possível atualizar no Supabase.");
-    return normalizeSupabaseEntry(data);
-  }
-
-  if (state.storageMode === "api") {
-    const response = await fetch(`/api/entries/${encodeURIComponent(entryId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(changes),
-    });
-    const payload = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(payload.message || "Não foi possível atualizar o lançamento.");
-    }
-
-    return payload.entry;
-  }
-
   const currentEntry = state.entries.find((entry) => String(entry.id) === String(entryId));
   if (!currentEntry) throw new Error("Lançamento não encontrado.");
-  return { ...currentEntry, ...changes };
+  if (state.storageMode !== "firestore") {
+    throw new Error("Entre com Google para atualizar o lançamento.");
+  }
+
+  const updatedEntry = {
+    ...currentEntry,
+    ...changes,
+    updatedAt: new Date().toISOString(),
+  };
+  await firestoreCollection("entries").doc(String(entryId)).set(
+    {
+      category: updatedEntry.category,
+      value: Number(updatedEntry.value),
+      direction: updatedEntry.direction,
+      date: updatedEntry.date,
+      note: updatedEntry.note || "",
+      createdAt: updatedEntry.createdAt || new Date().toISOString(),
+      updatedAt: updatedEntry.updatedAt,
+    },
+    { merge: true },
+  );
+  return updatedEntry;
 }
 
 async function createEntry(entry) {
-  if (state.storageMode === "supabase") {
-    const { data, error } = await supabaseClient
-      .from("entries")
-      .insert(entry)
-      .select("id, category, value, direction, date, note, created_at")
-      .single();
-
-    if (error) throw new Error(error.message || "Não foi possível salvar no Supabase.");
-    return normalizeSupabaseEntry(data);
+  if (state.storageMode !== "firestore") {
+    throw new Error("Entre com Google para salvar o lançamento.");
   }
 
-  if (state.storageMode === "api") {
-    const response = await fetch("/api/entries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(entry),
-    });
-    const payload = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(payload.message || "Não foi possível salvar o lançamento.");
-    }
-
-    return payload.entry;
-  }
-
-  return {
-    id: globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now()),
+  const documentReference = firestoreCollection("entries").doc();
+  const savedEntry = {
     ...entry,
+    id: documentReference.id,
+    createdAt: new Date().toISOString(),
   };
+  await documentReference.set({
+    category: savedEntry.category,
+    value: Number(savedEntry.value),
+    direction: savedEntry.direction,
+    date: savedEntry.date,
+    note: savedEntry.note || "",
+    createdAt: savedEntry.createdAt,
+  });
+  return savedEntry;
 }
 
 async function handleEntrySubmit(event) {
@@ -1110,7 +958,6 @@ async function handleEntrySubmit(event) {
 
   try {
     state.entries.push(await createEntry(entry));
-    saveFallbackEntries();
   } catch (error) {
     console.warn("Erro ao salvar lançamento:", error);
     return;
@@ -1148,30 +995,14 @@ function resetNewCategoryForm() {
 }
 
 async function createCategoryOption(option) {
-  if (state.categoryStorageMode === "supabase") {
-    const { data, error } = await supabaseClient
-      .from("category_options")
-      .insert(option)
-      .select("name, direction")
-      .single();
-    if (error) throw new Error(error.message || "Não foi possível criar a opção no Supabase.");
-    return data;
+  if (state.categoryStorageMode !== "firestore") {
+    throw new Error("Entre com Google para criar uma opção.");
   }
 
-  if (state.categoryStorageMode === "api") {
-    const response = await fetch("/api/category-options", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(option),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.message || "Não foi possível criar a opção.");
-    }
-    return payload.option;
-  }
-
-  return option;
+  const savedOption = { ...option, createdAt: new Date().toISOString() };
+  const documentId = encodeURIComponent(option.name.toLocaleLowerCase("pt-BR"));
+  await firestoreCollection("categoryOptions").doc(documentId).set(savedOption);
+  return savedOption;
 }
 
 async function handleNewCategorySubmit(event) {
@@ -1208,7 +1039,6 @@ async function handleNewCategorySubmit(event) {
       direction: option.direction === "credit" ? "credit" : "debit",
       values: {},
     });
-    if (state.categoryStorageMode === "browser") saveFallbackCategoryOptions();
     refreshCategoryControls(option.name);
     render();
     closeNewCategoryDialog();
@@ -1326,8 +1156,6 @@ async function saveAsaasRevenue() {
     } else {
       state.entries.push(await createEntry(entry));
     }
-
-    saveFallbackEntries();
 
     state.selectedMonth = months[Number(data.period.key.slice(5, 7)) - 1]?.key || state.selectedMonth;
     render();
@@ -1659,32 +1487,20 @@ function renderSavedScenarios() {
 }
 
 async function createViabilityScenario(scenario) {
-  if (state.scenarioStorageMode === "supabase") {
-    const { data, error } = await supabaseClient
-      .from("viability_scenarios")
-      .insert(serializeSupabaseScenario(scenario))
-      .select("id, name, initial_investment, annual_rate, months, monthly_net_inflow, residual_value, actual_monthly_flows, created_at")
-      .single();
-
-    if (error) throw new Error(error.message || "Não foi possível salvar no Supabase.");
-    return normalizeSupabaseScenario(data);
+  if (state.scenarioStorageMode !== "firestore") {
+    throw new Error("Entre com Google para salvar o cenário.");
   }
 
-  if (state.scenarioStorageMode === "api") {
-    const response = await fetch("/api/viability-scenarios", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(scenario),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.message || "Não foi possível salvar o cenário.");
-    return payload.scenario;
-  }
-
-  if (state.scenarioStorageMode === "unavailable") {
-    throw new Error(state.scenarioStorageError || "O armazenamento de cenários está indisponível.");
-  }
-
+  await firestoreCollection("viabilityScenarios").doc(scenario.id).set({
+    name: scenario.name,
+    initialInvestment: Number(scenario.initialInvestment),
+    annualRate: Number(scenario.annualRate),
+    months: Number(scenario.months),
+    monthlyNetInflow: Number(scenario.monthlyNetInflow),
+    residualValue: Number(scenario.residualValue || 0),
+    actualMonthlyFlows: scenario.actualMonthlyFlows || [],
+    createdAt: scenario.createdAt,
+  });
   return scenario;
 }
 
@@ -1709,20 +1525,17 @@ async function handleViabilitySubmit(event) {
   };
 
   submitButton.disabled = true;
-  feedback.textContent = state.scenarioStorageMode === "supabase"
+  feedback.textContent = state.scenarioStorageMode === "firestore"
     ? "Salvando cenário na base de dados…"
     : "Salvando cenário…";
 
   try {
     const savedScenario = await createViabilityScenario(scenario);
     state.viabilityScenarios.unshift(savedScenario);
-    if (state.scenarioStorageMode === "browser") saveViabilityScenarios();
     renderSavedScenarios();
-    feedback.textContent = state.scenarioStorageMode === "supabase"
+    feedback.textContent = state.scenarioStorageMode === "firestore"
       ? "Cenário salvo na base de dados."
-      : state.scenarioStorageMode === "api"
-        ? "Cenário salvo no servidor."
-        : "Cenário salvo neste navegador.";
+      : "Não foi possível acessar o armazenamento.";
   } catch (error) {
     console.warn("Erro ao salvar cenário:", error);
     feedback.textContent = error.message || "Não foi possível salvar o cenário.";
@@ -1759,26 +1572,14 @@ async function deleteViabilityScenario(scenarioId) {
   if (!scenario || !window.confirm(`Excluir o cenário “${scenario.name}”?`)) return;
 
   try {
-    if (state.scenarioStorageMode === "supabase") {
-      const { error } = await supabaseClient
-        .from("viability_scenarios")
-        .delete()
-        .eq("id", scenario.id);
-      if (error) throw new Error(error.message || "Não foi possível excluir no Supabase.");
-    } else if (state.scenarioStorageMode === "api") {
-      const response = await fetch(`/api/viability-scenarios/${encodeURIComponent(scenario.id)}`, {
-        method: "DELETE",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || "Não foi possível excluir o cenário.");
-    } else if (state.scenarioStorageMode === "unavailable") {
-      throw new Error(state.scenarioStorageError || "O armazenamento de cenários está indisponível.");
+    if (state.scenarioStorageMode !== "firestore") {
+      throw new Error("Entre com Google para excluir o cenário.");
     }
+    await firestoreCollection("viabilityScenarios").doc(scenario.id).delete();
 
     state.viabilityScenarios = state.viabilityScenarios.filter(
       (item) => String(item.id) !== scenarioId,
     );
-    if (state.scenarioStorageMode === "browser") saveViabilityScenarios();
     renderSavedScenarios();
   } catch (error) {
     console.warn("Erro ao excluir cenário:", error);
@@ -1802,19 +1603,18 @@ function formatMonths(value) {
 async function clearEntries() {
   if (!state.entries.length) return;
 
-  if (state.storageMode === "supabase") {
-    const { error } = await supabaseClient.from("entries").delete().neq("id", 0);
-    if (error) {
-      console.warn("Erro ao limpar Supabase:", error);
-      return;
-    }
-  } else if (state.storageMode === "api") {
-    const response = await fetch("/api/entries", { method: "DELETE" });
-    if (!response.ok) return;
+  if (state.storageMode !== "firestore") return;
+
+  const snapshot = await firestoreCollection("entries").get();
+  for (let offset = 0; offset < snapshot.docs.length; offset += 450) {
+    const batch = firestore.batch();
+    snapshot.docs.slice(offset, offset + 450).forEach((documentSnapshot) => {
+      batch.delete(documentSnapshot.ref);
+    });
+    await batch.commit();
   }
 
   state.entries = [];
-  saveFallbackEntries();
   render();
 }
 
@@ -1893,6 +1693,10 @@ document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => showWorkspaceView(button.dataset.viewTarget));
 });
 
+document.querySelector("#signInButton").addEventListener("click", signInWithGoogle);
+document.querySelector("#sidebarSignInButton").addEventListener("click", signInWithGoogle);
+document.querySelector("#signOutButton").addEventListener("click", signOut);
+
 document.querySelector("#backHomeButton").addEventListener("click", showHome);
 
 document.querySelector("#monthFilter").addEventListener("change", (event) => {
@@ -1951,16 +1755,19 @@ async function initializeApp() {
   setAppLoading(true);
 
   try {
-    await setupSupabase();
-    await loadEntries();
-    await loadCategoryOptions();
-    await loadStoredViabilityScenarios();
+    await setupFirebase();
+    if (state.authUser) {
+      await loadAuthenticatedData();
+    } else {
+      resetAuthenticatedData();
+    }
   } catch (error) {
     console.error("Erro ao inicializar o painel:", error);
   } finally {
     populateControls();
     state.appReady = true;
     setAppLoading(false);
+    render();
     showHome();
   }
 }
