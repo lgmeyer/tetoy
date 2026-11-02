@@ -6,11 +6,31 @@ await import("../dashboard-calculations.js");
 const {
   signedEntryAmount,
   summarizeEntries,
+  summarizeAccountedEntries,
+  isInternalTransferCategory,
   calculateNpv,
   calculateIrr,
   calculatePayback,
   calculateViability,
 } = globalThis.DashboardCalculations;
+
+test("identifica movimentações internas mesmo com variações de texto", () => {
+  assert.equal(isInternalTransferCategory("RESGATE DE APLICAÇÃO"), true);
+  assert.equal(isInternalTransferCategory("  aplicação   financeira "), true);
+  assert.equal(isInternalTransferCategory("RECEITA"), false);
+});
+
+test("exclui resgates e aplicações financeiras do resumo contabilizado", () => {
+  assert.deepEqual(
+    summarizeAccountedEntries([
+      { category: "RECEITA", value: 2500, direction: "credit" },
+      { category: "RESGATE DE APLICAÇÃO", value: 1000, direction: "credit" },
+      { category: "APLICAÇÃO FINANCEIRA", value: 800, direction: "debit" },
+      { category: "OUTRO", value: 400, direction: "debit" },
+    ]),
+    { credit: 2500, debit: 400, net: 2100 },
+  );
+});
 
 test("trata crédito como positivo e débito como negativo", () => {
   assert.equal(signedEntryAmount({ value: 120, direction: "credit" }), 120);

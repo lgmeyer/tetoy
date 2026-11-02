@@ -63,7 +63,8 @@ const shortDate = new Intl.DateTimeFormat("pt-BR", {
 const {
   positiveAmount,
   signedEntryAmount,
-  summarizeEntries,
+  summarizeAccountedEntries,
+  isInternalTransferCategory,
   calculateViability,
 } = globalThis.DashboardCalculations;
 
@@ -249,7 +250,12 @@ function rowTotal(category) {
 }
 
 function monthTotal(monthKey) {
-  return spreadsheetRows.reduce((total, row) => total + valueFor(row.category, monthKey), 0);
+  return spreadsheetRows.reduce(
+    (total, row) => total + (
+      isInternalTransferCategory(row.category) ? 0 : valueFor(row.category, monthKey)
+    ),
+    0,
+  );
 }
 
 function monthHasData(monthKey) {
@@ -276,9 +282,10 @@ function projectPeriodLabel(index) {
 
 function monthBreakdown(monthKey) {
   const entries = state.entries.filter((entry) => getMonthFromDate(entry.date) === monthKey);
-  const summary = summarizeEntries(entries);
+  const summary = summarizeAccountedEntries(entries);
 
   spreadsheetRows.forEach((row) => {
+    if (isInternalTransferCategory(row.category)) return;
     const amount = positiveAmount(baseValueFor(row.category, monthKey));
     if (!amount) return;
 
@@ -295,7 +302,10 @@ function annualTotal() {
 
 function insertedTotal(direction) {
   return state.entries
-    .filter((entry) => entry.direction === direction)
+    .filter(
+      (entry) => entry.direction === direction
+        && !isInternalTransferCategory(entry.category),
+    )
     .reduce((total, entry) => total + positiveAmount(entry.value), 0);
 }
 
@@ -499,9 +509,15 @@ function renderSpreadsheet() {
   `;
 
   document.querySelector("#spreadsheetRows").innerHTML = spreadsheetRows
-    .map((row) => `
+    .map((row) => {
+      const isInternalTransfer = isInternalTransferCategory(row.category);
+      const categoryLabel = isInternalTransfer
+        ? `${escapeHtml(row.category)}<small class="internal-transfer-label">Movimentação interna · não contabilizada</small>`
+        : escapeHtml(row.category);
+
+      return `
       <tr>
-        <th>${escapeHtml(row.category)}</th>
+        <th${isInternalTransfer ? ' class="internal-transfer-row"' : ""}>${categoryLabel}</th>
         ${months
           .map((month) => {
             const value = valueFor(row.category, month.key);
@@ -532,7 +548,8 @@ function renderSpreadsheet() {
           .join("")}
         <td class="amount-cell total-cell${amountToneClass(rowTotal(row.category))}">${formatTableValue(rowTotal(row.category))}</td>
       </tr>
-    `)
+    `;
+    })
     .join("");
 
   document.querySelector("#spreadsheetFoot").innerHTML = `
@@ -575,6 +592,7 @@ function renderMonthlyChart() {
 function renderCategoryChart() {
   const canvas = document.querySelector("#categoryChart");
   const items = spreadsheetRows
+    .filter((row) => !isInternalTransferCategory(row.category))
     .map((row) => ({ label: compactLabel(row.category), value: Math.abs(rowTotal(row.category)) }))
     .filter((item) => item.value > 0)
     .sort((a, b) => b.value - a.value)

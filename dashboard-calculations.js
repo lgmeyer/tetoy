@@ -1,4 +1,22 @@
 (function registerDashboardCalculations(globalScope) {
+  const excludedCashFlowCategories = new Set([
+    "RESGATE DE APLICACAO",
+    "APLICACAO FINANCEIRA",
+  ]);
+
+  function normalizeCategoryForAccounting(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toUpperCase();
+  }
+
+  function isInternalTransferCategory(category) {
+    return excludedCashFlowCategories.has(normalizeCategoryForAccounting(category));
+  }
+
   function positiveAmount(value) {
     const amount = Number(value);
     return Number.isFinite(amount) ? Math.abs(amount) : 0;
@@ -24,6 +42,12 @@
         return summary;
       },
       { credit: 0, debit: 0, net: 0 },
+    );
+  }
+
+  function summarizeAccountedEntries(entries) {
+    return summarizeEntries(
+      entries.filter((entry) => !isInternalTransferCategory(entry?.category)),
     );
   }
 
@@ -163,6 +187,8 @@
     positiveAmount,
     signedEntryAmount,
     summarizeEntries,
+    summarizeAccountedEntries,
+    isInternalTransferCategory,
     calculateNpv,
     calculateIrr,
     calculatePayback,
